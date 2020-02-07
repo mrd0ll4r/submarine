@@ -1,0 +1,1 @@
+set AR=arm-linux-gnueabihf-ar.exe

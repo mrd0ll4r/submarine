@@ -1,0 +1,27 @@
+config:
+  program:
+    api_listen_address: "localhost:3000"
+    prometheus_listen_address: "0.0.0.0:6969"
+    config_files: ["pca9685.yaml","dht22.yaml","mcp23017.yaml"]
+
+# Devices can be configured here already.
+#  devices:
+#    - type: pca9685_synchronized
+#      alias: pca9685-0
+#      config:
+#        i2c_bus: ""
+#        i2c_slave_address: 64
+#        use_external_clock: false
+#        inverted: true
+#        output_driver_totem_pole: true
+#        update_interval_millis: 5
+
+# Same for virtual devices.
+#  virtual_devices:
+#    - address: 20
+#      alias: strip0-y
+#      groups: ["strip0","strip-y"]
+#      mapping:
+#        device: pca9685-0
+#        port: 0
+#      read_only: false

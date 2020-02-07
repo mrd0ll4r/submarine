@@ -1,0 +1,63 @@
+config:
+  devices:
+    - type: mcp23017
+      alias: mcp-0
+      config:
+        i2c_bus: ""
+        i2c_slave_address: 32
+    - type: mcp23017
+      alias: mcp-1
+      config:
+        i2c_bus: ""
+        i2c_slave_address: 33
+    - type: mcp23017_input
+      alias: mcp-2
+      config:
+        i2c_bus: ""
+        i2c_slave_address: 34
+        polling_interval_millis: 5
+
+  virtual_devices:
+    - address: 1
+      alias: led0
+      groups: ["leds"]
+      mapping:
+        device: mcp-0
+        port: 6
+      read_only: false
+    - address: 2
+      alias: led1
+      groups: ["leds"]
+      mapping:
+        device: mcp-0
+        port: 7
+      read_only: false
+    - address: 3
+      alias: led2
+      groups: ["leds"]
+      mapping:
+        device: mcp-1
+        port: 6
+      read_only: false
+    - address: 4
+      alias: led3
+      groups: ["leds"]
+      mapping:
+        device: mcp-1
+        port: 7
+      read_only: false
+
+    - address: 15
+      alias: button0
+      groups: [""]
+      mapping:
+        device: mcp-2
+        port: 6
+      read_only: false
+    - address: 16
+      alias: button1
+      groups: [""]
+      mapping:
+        device: mcp-2
+        port: 7
+      read_only: false

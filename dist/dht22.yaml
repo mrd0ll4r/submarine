@@ -1,0 +1,46 @@
+config:
+  devices:
+    - type: dht22
+      alias: dht-1
+      config:
+        bcm_pin: 26
+        adjust_priority: true
+        use_experimental_version: true
+        readout_interval_seconds: 2
+    - type: dht22
+      alias: dht-2
+      config:
+        bcm_pin: 13
+        adjust_priority: true
+        use_experimental_version: false
+        readout_interval_seconds: 2
+  virtual_devices:
+    - address: 100
+      alias: dht1-temp
+      groups: ["temp"]
+      mapping:
+        device: dht-1
+        port: 0
+      read_only: true
+    - address: 101
+      alias: dht1-humidity
+      groups: ["humidity"]
+      mapping:
+        device: dht-1
+        port: 1
+      read_only: true
+
+    - address: 102
+      alias: dht2-temp
+      groups: ["temp"]
+      mapping:
+        device: dht-2
+        port: 0
+      read_only: true
+    - address: 103
+      alias: dht2-humidity
+      groups: ["humidity"]
+      mapping:
+        device: dht-2
+        port: 1
+      read_only: true

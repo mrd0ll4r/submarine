@@ -1,0 +1,117 @@
+config:
+  devices:
+    - type: pca9685_synchronized
+      alias: pca9685-0
+      config:
+        i2c_bus: ""
+        i2c_slave_address: 64
+        use_external_clock: false
+        inverted: true
+        output_driver_totem_pole: true
+        update_interval_millis: 5
+    - type: pca9685_synchronized
+      alias: pca9685-1
+      config:
+        i2c_bus: ""
+        i2c_slave_address: 65
+        use_external_clock: false
+        inverted: true
+        output_driver_totem_pole: true
+        update_interval_millis: 5
+    - type: pca9685_synchronized
+      alias: pca9685-2
+      config:
+        i2c_bus: ""
+        i2c_slave_address: 66
+        use_external_clock: false
+        inverted: true
+        output_driver_totem_pole: true
+        update_interval_millis: 5
+  virtual_devices:
+    - address: 20
+      alias: strip0-y
+      groups: ["strip0","strip-y"]
+      mapping:
+        device: pca9685-0
+        port: 0
+      read_only: false
+    - address: 21
+      alias: strip0-r
+      groups: ["strip0","strip-r"]
+      mapping:
+        device: pca9685-0
+        port: 1
+      read_only: false
+    - address: 22
+      alias: strip0-g
+      groups: ["strip0","strip-g"]
+      mapping:
+        device: pca9685-0
+        port: 2
+      read_only: false
+
+    - address: 23
+      alias: strip1-y
+      groups: ["strip1","strip-y"]
+      mapping:
+        device: pca9685-1
+        port: 0
+      read_only: false
+    - address: 24
+      alias: strip1-r
+      groups: ["strip1","strip-r"]
+      mapping:
+        device: pca9685-1
+        port: 1
+      read_only: false
+    - address: 25
+      alias: strip1-g
+      groups: ["strip1","strip-g"]
+      mapping:
+        device: pca9685-1
+        port: 2
+      read_only: false
+
+    - address: 26
+      alias: strip2-y
+      groups: ["strip2","strip-y"]
+      mapping:
+        device: pca9685-2
+        port: 0
+      read_only: false
+    - address: 27
+      alias: strip2-r
+      groups: ["strip2","strip-r"]
+      mapping:
+        device: pca9685-2
+        port: 1
+      read_only: false
+    - address: 28
+      alias: strip2-g
+      groups: ["strip2","strip-g"]
+      mapping:
+        device: pca9685-2
+        port: 2
+      read_only: false
+
+    - address: 29
+      alias: strip3-y
+      groups: ["strip3","strip-y"]
+      mapping:
+        device: pca9685-2
+        port: 13
+      read_only: false
+    - address: 30
+      alias: strip3-r
+      groups: ["strip3","strip-r"]
+      mapping:
+        device: pca9685-2
+        port: 14
+      read_only: false
+    - address: 31
+      alias: strip3-g
+      groups: ["strip3","strip-g"]
+      mapping:
+        device: pca9685-2
+        port: 15
+      read_only: false

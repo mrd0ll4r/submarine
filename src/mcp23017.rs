@@ -1,6 +1,5 @@
-use crate::device::{HardwareDevice, Value, VirtualDevice};
+use crate::device::{HardwareDevice,  VirtualDevice};
 use crate::device_core::{DeviceRWCore, SynchronizedDeviceRWCore};
-use crate::event::Event;
 use crate::{prom, Result};
 use embedded_hal as hal;
 use futures::Stream;
@@ -10,6 +9,8 @@ use std::pin::Pin;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Instant, SystemTime};
+use alloy::Value;
+use alloy::event::Event;
 
 pub(crate) struct MCP23017 {
     cond_var: Arc<Condvar>,

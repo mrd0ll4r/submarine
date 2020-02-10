@@ -3,6 +3,7 @@ use crate::mcp23017::MCP23017Config;
 use crate::mcp23017_input::MCP23017InputConfig;
 use crate::pca9685::PCA9685Config;
 use crate::Result;
+use alloy::config::VirtualDeviceConfig;
 use failure::ResultExt;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -146,21 +147,4 @@ pub(crate) enum DeviceConfig {
     },
     #[serde(rename = "dht22")]
     DHT22 { alias: String, config: DHT22Config },
-}
-
-/// Configuration for one virtual device.
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub(crate) struct VirtualDeviceConfig {
-    pub(crate) address: u16,
-    pub(crate) alias: String,
-    pub(crate) groups: Vec<String>,
-    pub(crate) mapping: MappingConfig,
-    pub(crate) read_only: bool,
-}
-
-/// Mapping of one virtual device to one port on a hardware device.
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub(crate) struct MappingConfig {
-    pub(crate) device: String,
-    pub(crate) port: u8,
 }

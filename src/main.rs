@@ -10,10 +10,11 @@ extern crate failure;
 #[macro_use]
 extern crate log;
 
-use crate::device::{Address, DeviceState};
+use crate::device::DeviceState;
 use crate::event::{consume_events, EventSubscriptions};
+use alloy::Address;
+use failure::{err_msg, Error, ResultExt};
 use std::sync::{Arc, Mutex};
-use failure::{Error,err_msg,ResultExt};
 use tokio::task;
 
 mod config;
@@ -87,7 +88,9 @@ async fn main() -> Result<()> {
         DeviceState::from_config(&cfg).context("unable to create device state")?;
 
     // Assume no subscriptions exist yet...
-    let event_subscriptions = Arc::new(event::empty_subscriptions(&device_state.virtual_device_configs));
+    let event_subscriptions = Arc::new(event::empty_subscriptions(
+        &device_state.virtual_device_configs,
+    ));
 
     info!("starting event stream consumers...");
     for (address, stream) in event_streams.into_iter() {

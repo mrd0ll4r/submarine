@@ -1,7 +1,7 @@
 use crate::device::{EventStream, HardwareDevice, VirtualDevice};
 use crate::device_core::{DeviceReadCore, SynchronizedDeviceReadCore};
 use crate::dht22_lib::ReadingError;
-use crate::{device, dht22_lib, prom, Result};
+use crate::{dht22_lib, prom, Result};
 use failure::ResultExt;
 use rand::Rng;
 use rppal::gpio;
@@ -112,8 +112,8 @@ impl DHT22 {
                         continue;
                     }
 
-                    let temp = device::map_to_value((-40_f64, 80_f64), readings.temperature as f64);
-                    let humidity = device::map_to_value((0_f64, 100_f64), readings.humidity as f64);
+                    let temp = alloy::map_to_value((-40_f64, 80_f64), readings.temperature as f64);
+                    let humidity = alloy::map_to_value((0_f64, 100_f64), readings.humidity as f64);
 
                     {
                         let mut core = core.lock().unwrap();

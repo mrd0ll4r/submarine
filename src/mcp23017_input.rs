@@ -1,6 +1,5 @@
-use crate::device::{HardwareDevice, VirtualDevice, HIGH, LOW};
+use crate::device::{HardwareDevice, VirtualDevice};
 use crate::device_core::{DeviceReadCore, SynchronizedDeviceReadCore};
-use crate::event::{ButtonEvent, Event, EventKind};
 use crate::mcp23017::{MCP23017Config, MCP23017};
 use crate::prom;
 use crate::{poll, Result};
@@ -13,6 +12,8 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
+use alloy::{HIGH, LOW};
+use alloy::event::{Event, EventKind, ButtonEvent};
 
 pub(crate) struct MCP23017Input {
     inner: SynchronizedDeviceReadCore,

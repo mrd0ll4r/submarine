@@ -1,12 +1,11 @@
-use crate::config::VirtualDeviceConfig;
 use crate::device::DeviceState;
-use crate::event::{EventFilter, EventFilterEntry, EventFilterStrategy};
 use crate::{logging, Result, State};
+use alloy::api::*;
+use alloy::event::EventFilter;
 use failure::ResultExt;
 use http::status::StatusCode;
-use serde::{Deserialize, Serialize};
 use std::convert::{From, Into};
-use tide::{IntoResponse, Response};
+use tide::Response;
 
 pub(crate) fn new(s: State) -> tide::Server<State> {
     let mut app = tide::with_state(s);
@@ -27,114 +26,15 @@ async fn home(_req: tide::Request<State>) -> impl tide::IntoResponse {
     "Hello, world!"
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-struct SubscriptionRequest {
-    address: u16,
-    strategy: EventFilterStrategy,
-    filters: Vec<EventFilterEntry>,
-    callback: String,
+fn api_response_to_tide_response(resp: APIResponse) -> Response {
+    Response::new(resp.status).body_json(&resp).unwrap()
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-struct SetRequest {
-    values: Vec<SetRequestInner>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-enum SetRequestInner {
-    Address { address: u16, value: u16 },
-    Alias { alias: String, value: u16 },
-    Group { group: String, value: u16 },
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct APIResponse {
-    ok: bool,
-    status: u16,
-    error: Option<String>,
-    result: Option<APIResult>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-enum APIResult {
-    Set,
-    Get {
-        value: u16,
-    },
-    Subscription,
-    Device {
-        virtual_devices: Vec<VirtualDeviceConfig>,
-    },
-}
-
-impl APIResponse {
-    fn from_result(result: APIResult) -> Self {
-        APIResponse {
-            ok: true,
-            status: StatusCode::OK.as_u16(),
-            error: None,
-            result: Some(result),
-        }
-    }
-
-    fn from_status(status: StatusCode) -> Self {
-        APIResponse {
-            ok: status.is_success(),
-            status: status.as_u16(),
-            error: if status.is_success() {
-                None
-            } else {
-                Some(status.canonical_reason().unwrap().to_string())
-            },
-            result: None,
-        }
-    }
-
-    fn from_error(e: failure::Error) -> Self {
-        APIResponse {
-            ok: false,
-            status: StatusCode::BAD_REQUEST.as_u16(),
-            error: Some(format!("{}", e)),
-            result: None,
-        }
-    }
-
-    fn as_response(&self) -> Response {
-        Response::new(self.status).body_json(&self).unwrap()
-    }
-}
-
-impl IntoResponse for APIResponse {
-    fn into_response(self) -> Response {
-        self.as_response()
-    }
-}
-
-impl From<APIResponse> for tide::Error {
-    fn from(resp: APIResponse) -> Self {
-        tide::Error::from(resp.into_response())
-    }
-}
-
-impl From<StatusCode> for APIResponse {
-    fn from(status: StatusCode) -> Self {
-        APIResponse::from_status(status)
-    }
-}
-
-impl From<APIResult> for APIResponse {
-    fn from(res: APIResult) -> Self {
-        APIResponse::from_result(res)
-    }
-}
-
-pub fn result_to_response<T: IntoResponse, E: IntoResponse>(
-    r: std::result::Result<T, E>,
-) -> Response {
+pub fn result_to_response(r: std::result::Result<APIResponse, APIResponse>) -> Response {
     match r {
-        Ok(r) => r.into_response(),
+        Ok(r) => api_response_to_tide_response(r),
         Err(r) => {
-            let res = r.into_response();
+            let res = api_response_to_tide_response(r);
             if res.status().is_success() {
                 panic!(
                     "Attempted to yield error response with success code {:?}",
@@ -172,7 +72,7 @@ fn set_inner(state: &mut DeviceState, req: SetRequest) -> Result<()> {
     Ok(())
 }
 
-async fn set(mut req: tide::Request<State>) -> tide::Result<impl IntoResponse> {
+async fn set(mut req: tide::Request<State>) -> std::result::Result<APIResponse, APIResponse> {
     let r: SetRequest = req
         .body_json()
         .await
@@ -192,7 +92,7 @@ async fn set(mut req: tide::Request<State>) -> tide::Result<impl IntoResponse> {
         })
 }
 
-async fn get(req: tide::Request<State>) -> tide::Result<impl IntoResponse> {
+async fn get(req: tide::Request<State>) -> std::result::Result<APIResponse, APIResponse> {
     let addr: u16 = req.param("addr").unwrap();
     debug!("get parsed addr: {}", addr);
 
@@ -209,18 +109,18 @@ async fn get(req: tide::Request<State>) -> tide::Result<impl IntoResponse> {
         })
 }
 
-async fn devices(req: tide::Request<State>) -> tide::Result<impl IntoResponse> {
+async fn devices(req: tide::Request<State>) -> std::result::Result<APIResponse, APIResponse> {
     let res = {
         let state = req.state().inner.lock().unwrap();
         state.virtual_device_configs.clone()
     };
 
-    Ok(APIResponse::from(APIResult::Device {
+    Ok(APIResponse::from(APIResult::Devices {
         virtual_devices: res,
     }))
 }
 
-async fn subscribe(mut req: tide::Request<State>) -> tide::Result<impl IntoResponse> {
+async fn subscribe(mut req: tide::Request<State>) -> std::result::Result<APIResponse, APIResponse> {
     let r: SubscriptionRequest = req
         .body_json()
         .await

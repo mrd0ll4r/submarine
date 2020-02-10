@@ -16,6 +16,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "alloy"
+version = "0.1.0"
+source = "git+https://github.com/mrd0ll4r/alloy#e1afaf2e9d4ad9ecbae6010cd1407fb351f8fd5b"
+dependencies = [
+ "failure",
+ "http 0.2.0",
+ "serde",
+]
+
+[[package]]
 name = "anyhow"
 version = "1.0.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1727,6 +1737,7 @@ dependencies = [
 name = "submarine"
 version = "0.1.0"
 dependencies = [
+ "alloy",
  "embedded-hal",
  "failure",
  "flexi_logger",
@@ -1746,7 +1757,6 @@ dependencies = [
  "rand",
  "rppal",
  "serde",
- "serde_derive",
  "serde_json",
  "serde_yaml",
  "systemstat",

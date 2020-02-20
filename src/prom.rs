@@ -1,6 +1,8 @@
 use crate::Result;
 use prometheus::exponential_buckets;
-use prometheus::{Gauge, GaugeVec, HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec};
+use prometheus::{
+    Gauge, GaugeVec, Histogram, HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec,
+};
 use prometheus_exporter::PrometheusExporter;
 use std::net::SocketAddr;
 use std::thread;
@@ -59,11 +61,10 @@ lazy_static! {
     "number of events dropped instead of being sent out, due to full buffers/slow receivers"
     ).unwrap();
 
-    pub static ref EVENT_PUSH_DURATION: HistogramVec = register_histogram_vec!(
+    pub static ref EVENT_PUSH_DURATION: Histogram = register_histogram!(
     "event_push_duration",
     "duration of pushing events in seconds by result",
-    &["result"],
-    exponential_buckets(0.001_f64,2_f64, 10).unwrap()
+    exponential_buckets(0.00005_f64,4_f64, 10).unwrap()
     ).unwrap();
 }
 

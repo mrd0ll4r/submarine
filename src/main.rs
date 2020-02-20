@@ -11,13 +11,10 @@ extern crate failure;
 extern crate log;
 
 use crate::device::DeviceState;
-use crate::event::{consume_events, EventSubscriptions};
+use crate::event::consume_events;
 use alloy::Address;
 use failure::{err_msg, Error, ResultExt};
-use futures::channel::mpsc::{ channel, Sender};
-use futures::StreamExt;
-use std::future::Future;
-use std::pin::Pin;
+use futures::FutureExt;
 use std::sync::{Arc, Mutex};
 use tokio::task;
 
@@ -42,8 +39,6 @@ type Result<T> = std::result::Result<T, Error>;
 
 struct State {
     inner: Arc<Mutex<DeviceState>>,
-    event_subscriptions: Arc<EventSubscriptions>,
-    spawner: Sender<Pin<Box<dyn Future<Output = ()> + Send>>>,
 }
 
 #[tokio::main]
@@ -92,7 +87,7 @@ async fn main() -> Result<()> {
     let (device_state, event_streams) =
         DeviceState::from_config(&cfg).context("unable to create device state")?;
 
-    // Assume no subscriptions exist yet...
+    // Get a clean slate of no subscriptions
     let event_subscriptions = Arc::new(event::empty_subscriptions(
         &device_state.virtual_device_configs,
     ));
@@ -106,26 +101,46 @@ async fn main() -> Result<()> {
         ));
     }
 
-    let (tx, mut rx) = channel(0);
-    task::spawn(async move {
-        while let Some(t) = rx.next().await {
-            task::spawn(t);
-        }
-    });
+    info!("starting event server...");
+    let event_server_address = cfg.program.event_server_listen_address.parse()?;
+    let mut event_server = task::spawn(event::run_server(
+        event_server_address,
+        event_subscriptions.clone(),
+    ))
+    .fuse();
 
     let state = State {
         inner: Arc::new(Mutex::new(device_state)),
-        event_subscriptions,
-        spawner: tx,
     };
 
     info!("starting API...");
     let app = server::new(state);
-    let server = app.listen(cfg.program.api_listen_address.clone());
+    let mut api_server = task::spawn(app.listen(cfg.program.api_listen_address.clone())).fuse();
 
-    info!("listening on http://{}", cfg.program.api_listen_address);
+    info!(
+        "event server is listening on tcp://{}",
+        cfg.program.event_server_listen_address
+    );
+    info!(
+        "API is listening on http://{}",
+        cfg.program.api_listen_address
+    );
 
-    server.await?;
+    loop {
+        futures::select! {
+            res = event_server => {
+                if let Err(e) = res {
+                    return Err(e.into())
+                }
+            },
+            res = api_server => {
+                if let Err(e) = res {
+                    return Err(e.into())
+                }
+            },
+            complete=> break,
+        }
+    }
 
     Ok(())
 }

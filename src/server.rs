@@ -1,7 +1,6 @@
 use crate::device::DeviceState;
 use crate::{logging, Result, State};
 use alloy::api::*;
-use alloy::event::EventFilter;
 use failure::ResultExt;
 use http::status::StatusCode;
 use std::convert::{From, Into};
@@ -15,8 +14,6 @@ pub(crate) fn new(s: State) -> tide::Server<State> {
         .get(|req| async move { result_to_response(devices(req).await) });
     app.at("/set")
         .post(|req| async move { result_to_response(set(req).await) });
-    app.at("/subscribe")
-        .post(|req| async move { result_to_response(subscribe(req).await) });
     app.at("/get/:addr")
         .get(|req| async move { result_to_response(get(req).await) });
     app
@@ -118,46 +115,4 @@ async fn devices(req: tide::Request<State>) -> std::result::Result<APIResponse, 
     Ok(APIResponse::from(APIResult::Devices {
         virtual_devices: res,
     }))
-}
-
-async fn subscribe(mut req: tide::Request<State>) -> std::result::Result<APIResponse, APIResponse> {
-    let r: SubscriptionRequest = req
-        .body_json()
-        .await
-        .map_err(|_| APIResponse::from(StatusCode::BAD_REQUEST))?;
-
-    debug!("subscription request: {:?}", r);
-
-    let callback = r.callback.clone();
-
-    let mut senders = crate::event::REGISTRY.lock().unwrap();
-    if !senders.contains_key(&r.callback) {
-        let (sender, t) = crate::event::create_sender(callback.clone());
-        senders.insert(callback, sender);
-        let res = req.state().spawner.clone().try_send(t);
-        match res {
-            Ok(()) => {}
-            Err(e) => {
-                error!("unable to spawn new sender: {:?}", e);
-                return Err(APIResponse::from_status(StatusCode::INTERNAL_SERVER_ERROR));
-            }
-        }
-    }
-    let sender = senders.get(&r.callback).unwrap().clone();
-
-    let subscriptions = &*req.state().event_subscriptions;
-    let mut filters = subscriptions
-        .get(&r.address)
-        .expect("missing address in event filters")
-        .lock()
-        .unwrap();
-    filters.push((
-        EventFilter {
-            strategy: r.strategy,
-            entries: r.filters,
-        },
-        sender,
-    ));
-
-    Ok(APIResponse::from(APIResult::Subscription))
 }

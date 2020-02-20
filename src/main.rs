@@ -14,6 +14,10 @@ use crate::device::DeviceState;
 use crate::event::{consume_events, EventSubscriptions};
 use alloy::Address;
 use failure::{err_msg, Error, ResultExt};
+use futures::channel::mpsc::{ channel, Sender};
+use futures::StreamExt;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use tokio::task;
 
@@ -39,6 +43,7 @@ type Result<T> = std::result::Result<T, Error>;
 struct State {
     inner: Arc<Mutex<DeviceState>>,
     event_subscriptions: Arc<EventSubscriptions>,
+    spawner: Sender<Pin<Box<dyn Future<Output = ()> + Send>>>,
 }
 
 #[tokio::main]
@@ -94,18 +99,24 @@ async fn main() -> Result<()> {
 
     info!("starting event stream consumers...");
     for (address, stream) in event_streams.into_iter() {
-        let https = hyper_rustls::HttpsConnector::new();
         task::spawn(consume_events(
             event_subscriptions.clone(),
-            hyper::Client::builder().build::<_, hyper::Body>(https),
             address as Address,
             stream,
         ));
     }
 
+    let (tx, mut rx) = channel(0);
+    task::spawn(async move {
+        while let Some(t) = rx.next().await {
+            task::spawn(t);
+        }
+    });
+
     let state = State {
         inner: Arc::new(Mutex::new(device_state)),
         event_subscriptions,
+        spawner: tx,
     };
 
     info!("starting API...");

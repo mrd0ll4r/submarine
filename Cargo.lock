@@ -828,6 +828,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyper-timeout"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2e98d46e385ee702f80447f78f7703ff7afb6d7080e51535400f5924746023f"
+dependencies = [
+ "bytes 0.5.4",
+ "hyper 0.13.2",
+ "tokio 0.2.11",
+ "tokio-io",
+ "tokio-io-timeout",
+]
+
+[[package]]
 name = "i2cdev"
 version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1745,6 +1758,7 @@ dependencies = [
  "http 0.2.0",
  "hyper 0.13.2",
  "hyper-rustls",
+ "hyper-timeout",
  "itertools",
  "lazy_static",
  "libc",
@@ -1943,6 +1957,16 @@ dependencies = [
  "bytes 0.4.12",
  "futures 0.1.29",
  "log",
+]
+
+[[package]]
+name = "tokio-io-timeout"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9390a43272c8a6ac912ed1d1e2b6abeafd5047e05530a2fa304deee041a06215"
+dependencies = [
+ "bytes 0.5.4",
+ "tokio 0.2.11",
 ]
 
 [[package]]

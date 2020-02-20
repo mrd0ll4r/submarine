@@ -54,11 +54,16 @@ lazy_static! {
     "number of events matched, this does not count matches against multiple receivers as multiple matches"
     ).unwrap();
 
-    pub static ref EVENTS_PUSHED: HistogramVec = register_histogram_vec!(
-    "events_pushed_duration",
+    pub static ref EVENTS_DROPPED: IntCounter = register_int_counter!(
+    "events_dropped",
+    "number of events dropped instead of being sent out, due to full buffers/slow receivers"
+    ).unwrap();
+
+    pub static ref EVENT_PUSH_DURATION: HistogramVec = register_histogram_vec!(
+    "event_push_duration",
     "duration of pushing events in seconds by result",
     &["result"],
-    exponential_buckets(0.0002_f64,(1.5_f64).sqrt(), 10).unwrap()
+    exponential_buckets(0.001_f64,2_f64, 10).unwrap()
     ).unwrap();
 }
 

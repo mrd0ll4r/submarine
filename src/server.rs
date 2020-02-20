@@ -128,20 +128,36 @@ async fn subscribe(mut req: tide::Request<State>) -> std::result::Result<APIResp
 
     debug!("subscription request: {:?}", r);
 
-    let state = &*req.state().event_subscriptions;
-    let a = state
-        .get(&r.address)
-        .expect("missing address in event filters");
-    {
-        let mut filters = a.lock().unwrap();
-        filters.push((
-            EventFilter {
-                strategy: r.strategy,
-                entries: r.filters,
-            },
-            r.callback,
-        ));
+    let callback = r.callback.clone();
+
+    let mut senders = crate::event::REGISTRY.lock().unwrap();
+    if !senders.contains_key(&r.callback) {
+        let (sender, t) = crate::event::create_sender(callback.clone());
+        senders.insert(callback, sender);
+        let res = req.state().spawner.clone().try_send(t);
+        match res {
+            Ok(()) => {}
+            Err(e) => {
+                error!("unable to spawn new sender: {:?}", e);
+                return Err(APIResponse::from_status(StatusCode::INTERNAL_SERVER_ERROR));
+            }
+        }
     }
+    let sender = senders.get(&r.callback).unwrap().clone();
+
+    let subscriptions = &*req.state().event_subscriptions;
+    let mut filters = subscriptions
+        .get(&r.address)
+        .expect("missing address in event filters")
+        .lock()
+        .unwrap();
+    filters.push((
+        EventFilter {
+            strategy: r.strategy,
+            entries: r.filters,
+        },
+        sender,
+    ));
 
     Ok(APIResponse::from(APIResult::Subscription))
 }

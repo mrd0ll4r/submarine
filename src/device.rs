@@ -5,6 +5,9 @@ use crate::pca9685::PCA9685Config;
 use crate::pca9685_sync::PCA9685Synchronized;
 use crate::Result;
 use crate::{config, i2c_mock, mcp23017, mcp23017_input, pca9685};
+use alloy::config::{MappingConfig, VirtualDeviceConfig};
+use alloy::event::Event;
+use alloy::{Address, Value};
 use failure::{format_err, ResultExt};
 use futures::Stream;
 use itertools::Itertools;
@@ -12,9 +15,6 @@ use linux_embedded_hal as linux_hal;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
-use alloy::event::Event;
-use alloy::{Value, Address};
-use alloy::config::{VirtualDeviceConfig, MappingConfig};
 
 /// Encapsulates all functionality a hardware device must provide.
 pub(crate) trait HardwareDevice {

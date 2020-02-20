@@ -1,8 +1,8 @@
 use crate::device_core::SynchronizedDeviceRWCore;
 use crate::Result;
+use alloy::Value;
 use std::time::{Duration, Instant, SystemTime};
 use std::{thread, time};
-use alloy::Value;
 
 pub(crate) fn get_values_and_dirty(core: &SynchronizedDeviceRWCore) -> (Vec<Value>, bool) {
     let mut core = core.lock().unwrap();

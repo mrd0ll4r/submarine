@@ -1,7 +1,9 @@
+use crate::device::{EventStream, HardwareDevice, VirtualDevice};
 use crate::device_core::{DeviceRWCore, SynchronizedDeviceRWCore};
 use crate::poll;
 use crate::prom;
 use crate::Result;
+use alloy::Value;
 use embedded_hal as hal;
 use itertools::Itertools;
 use pwm_pca9685 as pwmdev;
@@ -10,8 +12,6 @@ use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
-use alloy::Value;
-use crate::device::{HardwareDevice, VirtualDevice, EventStream};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PCA9685Config {

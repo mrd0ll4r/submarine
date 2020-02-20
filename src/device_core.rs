@@ -1,5 +1,7 @@
 use crate::device::{EventStream, HardwareDevice, VirtualDevice};
 use crate::Result;
+use alloy::event::{Event, EventKind};
+use alloy::Value;
 use failure::{err_msg, Error};
 use futures::{Stream, StreamExt};
 use std::pin::Pin;
@@ -7,8 +9,6 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 use std::time::SystemTime;
 use std::{iter, mem};
-use alloy::Value;
-use alloy::event::{Event, EventKind};
 
 /// The core of most hardware devices.
 ///

@@ -89,13 +89,15 @@ impl DHT22 {
 
         loop {
             thread::sleep(readout_interval);
-            let ts = SystemTime::now();
 
             let readings = if use_experimental_implementation {
                 dht22_lib::read_pin_2(&mut pin, adjust_priority)
             } else {
                 dht22_lib::read_pin(&mut pin, adjust_priority)
             };
+            // Take this timestamp after the reading, because that takes a few milliseconds.
+            let ts = SystemTime::now();
+
             match readings {
                 Ok(readings) => {
                     debug!("got readings from pin {}: {:?}", pin.pin(), readings);

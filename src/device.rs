@@ -1,6 +1,7 @@
 use crate::config::{AggregatedConfig, DeviceConfig};
 use crate::device_core::{DeviceRWCore, SynchronizedDeviceRWCore};
 use crate::dht22::DHT22;
+use crate::gpio::GPIO;
 use crate::pca9685::PCA9685Config;
 use crate::pca9685_sync::PCA9685Synchronized;
 use crate::Result;
@@ -326,6 +327,18 @@ impl DeviceState {
                     );
                     let dev =
                         DHT22::new(alias.clone(), &config).context("unable to create DHT22")?;
+                    hardware_devices.insert(alias.clone(), Box::new(dev));
+                }
+                DeviceConfig::GPIO { alias, config } => {
+                    debug!("creating GPIO {}...", alias);
+                    let alias = alias.to_lowercase();
+                    debug!("normalized alias to {}", alias);
+                    ensure!(
+                        !hardware_devices.contains_key(&alias),
+                        "duplicate alias: {}",
+                        alias
+                    );
+                    let dev = GPIO::new(alias.clone(), &config).context("unable to create GPIO")?;
                     hardware_devices.insert(alias.clone(), Box::new(dev));
                 }
             }

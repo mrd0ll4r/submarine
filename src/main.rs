@@ -29,6 +29,7 @@ mod mcp23017_input;
 mod device_core;
 mod dht22;
 mod dht22_lib;
+mod gpio;
 mod pca9685;
 mod pca9685_sync;
 mod poll;

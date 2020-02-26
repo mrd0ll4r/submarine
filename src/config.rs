@@ -1,4 +1,5 @@
 use crate::dht22::DHT22Config;
+use crate::gpio::GPIOConfig;
 use crate::mcp23017::MCP23017Config;
 use crate::mcp23017_input::MCP23017InputConfig;
 use crate::pca9685::PCA9685Config;
@@ -149,4 +150,6 @@ pub(crate) enum DeviceConfig {
     },
     #[serde(rename = "dht22")]
     DHT22 { alias: String, config: DHT22Config },
+    #[serde(rename = "gpio")]
+    GPIO { alias: String, config: GPIOConfig },
 }

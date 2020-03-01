@@ -38,8 +38,6 @@ where
     );
     let mut dev = pwmdev::Pca9685::new(i2c, addr);
 
-    dev.set_prescale(4).map_err(PCA9685::do_map_err::<I2C, E>)?;
-
     if config.inverted {
         dev.set_output_logic_state(pwmdev::OutputLogicState::Inverted)
             .map_err(PCA9685::do_map_err::<I2C, E>)?;
@@ -62,6 +60,9 @@ where
     }
 
     dev.enable().map_err(PCA9685::do_map_err::<I2C, E>)?;
+
+    // This needs to be set after the device is enabled, for some reason.
+    dev.set_prescale(3).map_err(PCA9685::do_map_err::<I2C, E>)?;
 
     Ok(dev)
 }

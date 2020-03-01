@@ -53,11 +53,11 @@ config:
       mapping:
         device: mcp-2
         port: 6
-      read_only: false
+      read_only: true
     - address: 16
       alias: button1
       groups: [""]
       mapping:
         device: mcp-2
         port: 7
-      read_only: false
+      read_only: true

@@ -17,7 +17,7 @@ pub(crate) struct MCP23017 {
     core: SynchronizedDeviceRWCore,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MCP23017Config {
     pub i2c_bus: String,
     i2c_slave_address: u8,

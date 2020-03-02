@@ -19,7 +19,7 @@ pub(crate) struct MCP23017Input {
     inner: SynchronizedDeviceReadCore,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MCP23017InputConfig {
     pub i2c_bus: String,
     i2c_slave_address: u8,

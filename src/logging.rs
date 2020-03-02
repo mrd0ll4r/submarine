@@ -24,18 +24,21 @@ pub(crate) fn log_format(
     )
 }
 
-pub(crate) fn set_up_logging() -> Result<ReconfigurationHandle> {
-    let handle = Logger::with_env_or_str("debug")
-        .format(log_format)
-        .log_to_file()
-        .directory("logs")
-        .duplicate_to_stderr(Duplicate::All)
-        .rotate(
-            Criterion::Size(100_000_000),
-            Naming::Timestamps,
-            Cleanup::KeepLogFiles(10),
-        )
-        .start()?;
+pub(crate) fn set_up_logging(log_to_file: bool) -> Result<ReconfigurationHandle> {
+    let mut logger = Logger::with_env_or_str("debug").format(log_format);
+    if log_to_file {
+        logger = logger
+            .log_to_file()
+            .directory("logs")
+            .duplicate_to_stderr(Duplicate::All)
+            .rotate(
+                Criterion::Size(100_000_000),
+                Naming::Timestamps,
+                Cleanup::KeepLogFiles(10),
+            );
+    }
+
+    let handle = logger.start()?;
 
     Ok(handle)
 }

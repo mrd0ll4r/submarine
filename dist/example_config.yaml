@@ -3,6 +3,7 @@ config:
     http_server_listen_address: "localhost:3000"
     tcp_server_listen_address: "localhost:3030"
     prometheus_listen_address: "0.0.0.0:6969"
+    log_to_file: true
     config_files: ["pca9685.yaml","dht22.yaml","mcp23017.yaml"]
 
 # Devices can be configured here already.

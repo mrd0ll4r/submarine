@@ -46,10 +46,24 @@ struct State {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    logging::set_up_logging().context("unable to set up logging")?;
-
+    // This will probably not logged, but meh...
     info!("reading main config file...");
     let raw_main_config = config::ConfigFile::read_from_file("config.yaml")?;
+
+    // TODO it would be nicer to have this as an env variable or command line argument...
+    let program_config = raw_main_config
+        .config
+        .program
+        .clone()
+        .expect("missing program config block in main config file");
+
+    logging::set_up_logging(program_config.log_to_file).context("unable to set up logging")?;
+    info!(
+        "set up logging, loging to file? {}",
+        program_config.log_to_file
+    );
+
+    // Now we can actually start logging stuff
     debug!("read raw main config: {:?}", raw_main_config);
 
     let mut additional_configs = match raw_main_config.config.program {

@@ -12,13 +12,13 @@ use std::path::Path;
 
 /// The data structure parsed directly from any config file.
 /// This includes a top-level `config` block.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub(crate) struct ConfigFile {
     pub(crate) config: RawConfig,
 }
 
 /// A raw, unprocessed, organic, locally-harvested config from one file.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub(crate) struct RawConfig {
     pub(crate) program: Option<ProgramConfig>,
     pub(crate) devices: Option<Vec<DeviceConfig>>,
@@ -29,7 +29,7 @@ pub(crate) struct RawConfig {
 /// This is aggregated from multiple config files.
 /// Only one `program` block will be taken (the first, later ones will cause errors), and all
 /// `devices` and `virtual_devices` blocks will be concatenated.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct AggregatedConfig {
     pub(crate) program: ProgramConfig,
     pub(crate) devices: Vec<DeviceConfig>,
@@ -101,12 +101,13 @@ impl ConfigFile {
 }
 
 /// The config for the program as a whole, independent of devices.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub(crate) struct ProgramConfig {
     pub(crate) http_server_listen_address: String,
     pub(crate) tcp_server_listen_address: String,
     pub(crate) prometheus_listen_address: String,
     pub(crate) config_files: Option<Vec<String>>,
+    pub(crate) log_to_file: bool,
 }
 
 impl Default for ProgramConfig {
@@ -116,6 +117,7 @@ impl Default for ProgramConfig {
             tcp_server_listen_address: "localhost:3030".to_string(),
             prometheus_listen_address: "0.0.0.0:6969".to_string(),
             config_files: None,
+            log_to_file: true,
         }
     }
 }
@@ -125,7 +127,7 @@ impl Default for ProgramConfig {
 /// These generally have an alias and a device-specific configuration, which is needed by the driver
 /// for that device.
 /// The YAML representation is a tagged enum, with lowercase keys.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]
 pub(crate) enum DeviceConfig {
     #[serde(rename = "pca9685")]

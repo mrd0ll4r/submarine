@@ -12,6 +12,7 @@ flexi_logger = {version="0.14.7",features=["ziplogs"]}
 itertools = "0.8.2"
 rand = "0.7.2"
 alloy = {git = "https://github.com/mrd0ll4r/alloy"}
+#alloy = {path = "../alloy"}
 
 # Serde
 serde = {version="1.0.104",features=["derive"]}

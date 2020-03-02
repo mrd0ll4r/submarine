@@ -14,8 +14,9 @@ use crate::device::DeviceState;
 use crate::event::consume_events;
 use alloy::Address;
 use failure::{err_msg, Error, ResultExt};
+use futures::lock::Mutex;
 use futures::FutureExt;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::task;
 
 mod config;
@@ -30,11 +31,12 @@ mod device_core;
 mod dht22;
 mod dht22_lib;
 mod gpio;
+mod http;
 mod pca9685;
 mod pca9685_sync;
 mod poll;
 mod prom;
-mod server;
+mod tcp;
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -88,53 +90,50 @@ async fn main() -> Result<()> {
     let (device_state, event_streams) =
         DeviceState::from_config(&cfg).context("unable to create device state")?;
 
-    // Get a clean slate of no subscriptions
-    let event_subscriptions = Arc::new(event::empty_subscriptions(
-        &device_state.virtual_device_configs,
-    ));
+    // Set up event broadcasts
+    let event_broadcasts = Arc::new(event::new_publishers(&device_state.virtual_device_configs));
 
     info!("starting event stream consumers...");
     for (address, stream) in event_streams.into_iter() {
-        task::spawn(consume_events(
-            event_subscriptions.clone(),
-            address as Address,
-            stream,
-        ));
+        let broadcast_chan = event_broadcasts.get(&address).unwrap().clone();
+        task::spawn(consume_events(broadcast_chan, address as Address, stream));
     }
-
-    info!("starting event server...");
-    let event_server_address = cfg.program.event_server_listen_address.parse()?;
-    let mut event_server = task::spawn(event::run_server(
-        event_server_address,
-        event_subscriptions.clone(),
-    ))
-    .fuse();
 
     let state = State {
         inner: Arc::new(Mutex::new(device_state)),
     };
 
-    info!("starting API...");
-    let app = server::new(state);
-    let mut api_server = task::spawn(app.listen(cfg.program.api_listen_address.clone())).fuse();
+    info!("starting TCP server...");
+    let tcp_server_address = cfg.program.tcp_server_listen_address.parse()?;
+    let mut tcp_server = task::spawn(tcp::run_server(
+        tcp_server_address,
+        state.inner.clone(),
+        event_broadcasts.clone(),
+    ))
+    .fuse();
+
+    info!("starting HTTP server...");
+    let app = http::new(state);
+    let mut http_server =
+        task::spawn(app.listen(cfg.program.http_server_listen_address.clone())).fuse();
 
     info!(
-        "event server is listening on tcp://{}",
-        cfg.program.event_server_listen_address
+        "TCP server is listening on tcp://{}",
+        cfg.program.tcp_server_listen_address
     );
     info!(
-        "API is listening on http://{}",
-        cfg.program.api_listen_address
+        "HTTP server is listening on http://{}",
+        cfg.program.http_server_listen_address
     );
 
     loop {
         futures::select! {
-            res = event_server => {
+            res = tcp_server => {
                 if let Err(e) = res {
                     return Err(e.into())
                 }
             },
-            res = api_server => {
+            res = http_server => {
                 if let Err(e) = res {
                     return Err(e.into())
                 }

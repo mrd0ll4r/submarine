@@ -1,8 +1,6 @@
 use crate::Result;
 use prometheus::exponential_buckets;
-use prometheus::{
-    Gauge, GaugeVec, Histogram, HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec,
-};
+use prometheus::{Gauge, GaugeVec, HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec};
 use prometheus_exporter::PrometheusExporter;
 use std::net::SocketAddr;
 use std::thread;
@@ -53,18 +51,12 @@ lazy_static! {
 
     pub static ref EVENTS_MATCHED: IntCounter = register_int_counter!(
     "events_matched",
-    "number of events matched, this does not count matches against multiple receivers as multiple matches"
+    "number of events matched, this _does_ count matches against multiple receivers as multiple matches, i.e. this counts how many events were sent to subscribers"
     ).unwrap();
 
     pub static ref EVENTS_DROPPED: IntCounter = register_int_counter!(
     "events_dropped",
     "number of events dropped instead of being sent out, due to full buffers/slow receivers"
-    ).unwrap();
-
-    pub static ref EVENT_PUSH_DURATION: Histogram = register_histogram!(
-    "event_push_duration",
-    "duration of pushing events in seconds by result",
-    exponential_buckets(0.00005_f64,4_f64, 10).unwrap()
     ).unwrap();
 }
 

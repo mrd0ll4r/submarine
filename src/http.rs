@@ -1,6 +1,6 @@
 use crate::device::DeviceState;
 use crate::{logging, Result, State};
-use alloy::api::*;
+use alloy::http::{APIResponse, APIResult, SetRequest, SetRequestInner};
 use failure::ResultExt;
 use http::status::StatusCode;
 use std::convert::{From, Into};
@@ -77,7 +77,8 @@ async fn set(mut req: tide::Request<State>) -> std::result::Result<APIResponse, 
     debug!("set request: {:?}", r);
 
     let res = {
-        let mut state = req.state().inner.lock().unwrap();
+        let inner = req.state().inner.clone();
+        let mut state = inner.lock().await;
         set_inner(&mut state, r)
     };
 
@@ -94,7 +95,8 @@ async fn get(req: tide::Request<State>) -> std::result::Result<APIResponse, APIR
     debug!("get parsed addr: {}", addr);
 
     let res = {
-        let state = req.state().inner.lock().unwrap();
+        let inner = req.state().inner.clone();
+        let state = inner.lock().await;
         state.get_address(addr)
     };
 
@@ -108,7 +110,8 @@ async fn get(req: tide::Request<State>) -> std::result::Result<APIResponse, APIR
 
 async fn devices(req: tide::Request<State>) -> std::result::Result<APIResponse, APIResponse> {
     let res = {
-        let state = req.state().inner.lock().unwrap();
+        let inner = req.state().inner.clone();
+        let state = inner.lock().await;
         state.virtual_device_configs.clone()
     };
 

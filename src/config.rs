@@ -103,8 +103,8 @@ impl ConfigFile {
 /// The config for the program as a whole, independent of devices.
 #[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct ProgramConfig {
-    pub(crate) api_listen_address: String,
-    pub(crate) event_server_listen_address: String,
+    pub(crate) http_server_listen_address: String,
+    pub(crate) tcp_server_listen_address: String,
     pub(crate) prometheus_listen_address: String,
     pub(crate) config_files: Option<Vec<String>>,
 }
@@ -112,8 +112,8 @@ pub(crate) struct ProgramConfig {
 impl Default for ProgramConfig {
     fn default() -> Self {
         ProgramConfig {
-            api_listen_address: "localhost:3000".to_string(),
-            event_server_listen_address: "localhost:3030".to_string(),
+            http_server_listen_address: "localhost:3000".to_string(),
+            tcp_server_listen_address: "localhost:3030".to_string(),
             prometheus_listen_address: "0.0.0.0:6969".to_string(),
             config_files: None,
         }

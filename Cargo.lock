@@ -17,12 +17,19 @@ dependencies = [
 
 [[package]]
 name = "alloy"
-version = "0.1.0"
-source = "git+https://github.com/mrd0ll4r/alloy#5c54bf36736aca4385ded4fb0f76cf887586553b"
+version = "0.2.0"
+source = "git+https://github.com/mrd0ll4r/alloy#855f878044ac940a3f0a25d9069d0e2813d9f865"
 dependencies = [
+ "bytes 0.5.4",
  "failure",
+ "futures 0.3.3",
+ "futures-util",
  "http 0.2.0",
+ "log",
  "serde",
+ "serde_json",
+ "tokio 0.2.11",
+ "tokio-util",
 ]
 
 [[package]]

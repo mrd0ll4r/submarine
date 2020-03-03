@@ -165,9 +165,7 @@ impl PCA9685 {
         }
 
         // Debug print
-        for (i, value) in values.iter().enumerate() {
-            trace!("values[{}] = {}", i, *value);
-        }
+        debug!("values: [{}]", values.iter().join(", "));
 
         Self::handle_update_async_inner(values, dev, metric)
     }
@@ -187,6 +185,10 @@ impl PCA9685 {
         // Calculate ON/OFF values
         let start_stop_values = Self::calculate_on_off_values(&values);
         assert_eq!(start_stop_values.len(), 32);
+        debug!(
+            "start_stop values: [{}]",
+            start_stop_values.iter().join(", ")
+        );
 
         // Split into two arrays...
         let (a, b): (Vec<_>, Vec<_>) = start_stop_values.iter().tuples::<(_, _)>().unzip();
@@ -221,21 +223,41 @@ impl PCA9685 {
         E: Sync + Send + std::fmt::Debug + 'static,
     {
         match e {
-            pwmdev::Error::InvalidInputData => panic!(e),
+            pwmdev::Error::InvalidInputData => panic!("invalid input data"),
             pwmdev::Error::I2C(err) => failure::err_msg(format!("{:?}", err)),
         }
     }
 
     fn calculate_on_off_values(values: &[Value]) -> Vec<u16> {
-        // TODO figure this out
+        // TODO figure this out - use offsets to balance stuff?
         /*let offsets: Vec<u16> = (0..16_usize)
         .map(|n| Self::OFFSET[n % 4] + Self::OFFSET[n / 4])
         .collect();*/
+        /*
         let offsets: Vec<u16> = (0..16_usize).map(|_| 0).collect();
         offsets
             .iter()
             .zip(values.iter())
             .flat_map(|c| [c.0 % 4096, ((c.1 >> 4) + c.0) % 4096_u16].to_vec())
+            .collect()
+            */
+        values
+            .iter()
+            .map(|v| {
+                // Apply logarithmic scaling according to https://www.mikrocontroller.net/articles/LED-Fading
+                // First, special-case MIN and MAX because they are probably common...
+                if *v == std::u16::MIN {
+                    std::u16::MIN
+                } else if *v == std::u16::MAX {
+                    4095
+                } else {
+                    // pow(2, log2(b-1) * (x+1) / a)
+                    2_f64
+                        .powf((4096_f64 - 1_f64).log2() * (*v as f64 + 1_f64) / 65536_f64)
+                        .floor() as u16
+                }
+            })
+            .flat_map(|v| vec![0, v])
             .collect()
     }
 

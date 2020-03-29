@@ -32,7 +32,7 @@ embedded-hal = "0.2.3"
 linux-embedded-hal = "0.3.0"
 rppal = "0.11.3"
 pwm-pca9685 = "0.2.0"
-mcp23017 = "0.1.1"
+mcp23017 = {git ="https://github.com/mrd0ll4r/mcp23017"}
 libc = "0.2.66"
 
 # Prometheus stuff

@@ -18,7 +18,7 @@ dependencies = [
 [[package]]
 name = "alloy"
 version = "0.2.0"
-source = "git+https://github.com/mrd0ll4r/alloy#855f878044ac940a3f0a25d9069d0e2813d9f865"
+source = "git+https://github.com/mrd0ll4r/alloy#1aa70ccfa27aa8a2861cd3a09e58865502b2198a"
 dependencies = [
  "bytes 0.5.4",
  "failure",
@@ -562,15 +562,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "generic-array"
-version = "0.13.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ed1e761351b56f54eb9dcd0cfaca9fd0daecf93918e1cfc01c8a3d26ee7adcd"
-dependencies = [
- "typenum",
-]
-
-[[package]]
 name = "getrandom"
 version = "0.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -861,13 +852,9 @@ checksum = "60302e4db3a61da70c0cb7991976248362f30319e88850c487b9b95bbf059e00"
 [[package]]
 name = "mcp23017"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f4854484a74b626165c3f3cf5e15bfee2898c6b4d6eccc3ed5ee634850af4dd"
+source = "git+https://github.com/mrd0ll4r/mcp23017#ebaba33cba3a9a16a270580e72135c3df9e74f50"
 dependencies = [
- "cast",
  "embedded-hal",
- "generic-array",
- "nb",
 ]
 
 [[package]]
@@ -1797,12 +1784,6 @@ name = "try-lock"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e604eb7b43c06650e854be16a2a03155743d3752dd1c943f6829e26b7a36e382"
-
-[[package]]
-name = "typenum"
-version = "1.11.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d2783fe2d6b8c1101136184eb41be8b1ad379e4657050b8aaff0c79ee7575f9"
 
 [[package]]
 name = "unicode-bidi"

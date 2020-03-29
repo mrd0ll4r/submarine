@@ -24,6 +24,8 @@ pub struct MCP23017InputConfig {
     pub i2c_bus: String,
     i2c_slave_address: u8,
     polling_interval_millis: u64,
+    enable_pullups: bool,
+    invert: bool,
 }
 
 impl MCP23017Input {
@@ -45,8 +47,14 @@ impl MCP23017Input {
             "polling interval must be greater than zero"
         );
         let mut mcp = mcpdev::MCP23017::new(dev, addr).map_err(MCP23017::do_map_err::<I2C, E>)?;
-        mcp.write_gpioab(0)
-            .map_err(|e| failure::err_msg(format!("{:?}", e)))?;
+        for i in 0..16 {
+            mcp.pull_up(i, config.enable_pullups)
+                .map_err(|e| failure::err_msg(format!("{:?}", e)))?;
+        }
+        for i in 0..16 {
+            mcp.invert_input_polarity(i, config.invert)
+                .map_err(|e| failure::err_msg(format!("{:?}", e)))?;
+        }
         mcp.all_pin_mode(mcpdev::PinMode::INPUT)
             .map_err(|e| failure::err_msg(format!("{:?}", e)))?;
 

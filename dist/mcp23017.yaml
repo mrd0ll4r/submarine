@@ -16,6 +16,8 @@ config:
         i2c_bus: ""
         i2c_slave_address: 34
         polling_interval_millis: 5
+        enable_pullups: true
+        invert: true
 
   virtual_devices:
     - address: 1

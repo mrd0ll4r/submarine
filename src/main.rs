@@ -31,7 +31,7 @@ mod device_core;
 mod dht22;
 mod dht22_lib;
 mod gpio;
-mod http;
+//mod http;
 mod pca9685;
 mod pca9685_sync;
 mod poll;
@@ -40,6 +40,7 @@ mod tcp;
 
 type Result<T> = std::result::Result<T, Error>;
 
+#[derive(Clone, Debug)]
 struct State {
     inner: Arc<Mutex<DeviceState>>,
 }
@@ -126,19 +127,23 @@ async fn main() -> Result<()> {
     ))
     .fuse();
 
-    info!("starting HTTP server...");
-    let app = http::new(state);
-    let mut http_server =
-        task::spawn(app.listen(cfg.program.http_server_listen_address.clone())).fuse();
+    /*
+        info!("starting HTTP server...");
+        let app = http::new(state);
+        let mut http_server =
+            task::spawn(app.listen(cfg.program.http_server_listen_address.clone())).fuse();
+    */
 
     info!(
         "TCP server is listening on tcp://{}",
         cfg.program.tcp_server_listen_address
     );
+    /*
     info!(
         "HTTP server is listening on http://{}",
         cfg.program.http_server_listen_address
     );
+     */
 
     loop {
         futures::select! {
@@ -147,11 +152,11 @@ async fn main() -> Result<()> {
                     return Err(e.into())
                 }
             },
-            res = http_server => {
+            /*res = http_server => {
                 if let Err(e) = res {
                     return Err(e.into())
                 }
-            },
+            },*/
             complete=> break,
         }
     }

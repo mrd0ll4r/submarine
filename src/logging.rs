@@ -43,6 +43,7 @@ pub(crate) fn set_up_logging(log_to_file: bool) -> Result<ReconfigurationHandle>
     Ok(handle)
 }
 
+/*
 #[derive(Debug, Clone, Default)]
 pub(crate) struct RequestLogger;
 
@@ -56,8 +57,8 @@ impl RequestLogger {
         ctx: Request<State>,
         next: Next<'a, State>,
     ) -> Response {
-        let path = ctx.uri().path().to_owned();
-        let method = ctx.method().as_str().to_owned();
+        let path = ctx.url().path();
+        let method = ctx.method().as_ref();
         trace!(target:"server","IN => {} {}", method, path);
         let start = std::time::Instant::now();
         let res = next.run(ctx).await;
@@ -78,3 +79,4 @@ impl<State: Send + Sync + 'static> Middleware<State> for RequestLogger {
         Box::pin(async move { self.log_basic(ctx, next).await })
     }
 }
+*/

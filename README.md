@@ -215,6 +215,6 @@ It uses the usual Rust logging facilities, which can be controlled via the `RUST
 A good general setting for this might be `RUST_LOG="info"`.
 
 It has been observed that a current stable Raspbian shows somewhat high variance in network latencies.
-For this reason it is recommended to run [kaleidoscope](../kaleidoscope), the lighting execution engine, on the same
+For this reason it is recommended to run [Kaleidoscope](../kaleidoscope), the lighting execution engine, on the same
 device and communicate via loopback.
 This still(!) shows high variance, but is generally fast enough to not matter much in practice.

@@ -19,7 +19,6 @@ use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::time::SystemTime;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
@@ -30,7 +29,7 @@ pub(crate) async fn run_server(
     state: Arc<Mutex<DeviceState>>,
     event_publishers: Arc<EventPublishers>,
 ) -> Result<()> {
-    let mut listener = TcpListener::bind(addr).await?;
+    let listener = TcpListener::bind(addr).await?;
 
     loop {
         // Asynchronously wait for an inbound TcpStream.
@@ -82,7 +81,7 @@ impl Client {
         subscriptions: Arc<HashMap<Address, Mutex<Option<EventFilter>>>>,
         req: SubscriptionRequest,
         event_producers: Arc<EventPublishers>,
-        mut event_sink: Sender<AddressedEvent>,
+        event_sink: Sender<AddressedEvent>,
     ) -> Result<()> {
         let filters = subscriptions.get(&req.address);
         if let None = filters {
@@ -113,10 +112,10 @@ impl Client {
                     let val = event_stream.recv().await;
                     let events = match val {
                         Err(e) => match e {
-                            broadcast::RecvError::Closed => {
+                            broadcast::error::RecvError::Closed => {
                                 break;
                             }
-                            broadcast::RecvError::Lagged(count) => {
+                            broadcast::error::RecvError::Lagged(count) => {
                                 debug!(
                                     "event_filter {}/{}: lagged {} events",
                                     remote, address, count
@@ -177,7 +176,7 @@ impl Client {
         subscriptions: Arc<HashMap<Address, Mutex<Option<EventFilter>>>>,
     ) -> Result<APIResult> {
         match req {
-            APIRequest::SystemTime => Ok(APIResult::SystemTime(SystemTime::now())),
+            APIRequest::SystemTime => Ok(APIResult::SystemTime(chrono::Utc::now())),
             APIRequest::Ping => Ok(APIResult::Ping),
             APIRequest::Get(address) => {
                 let state = state.lock().await;
@@ -217,7 +216,7 @@ impl Client {
         event_producers: Arc<EventPublishers>,
         subscriptions: Arc<HashMap<Address, Mutex<Option<EventFilter>>>>,
     ) {
-        while let Some(msg) = input.next().await {
+        while let Some(msg) = input.recv().await {
             match msg {
                 Message::Version(_) => {
                     error!("handler {}: received version packet", remote);
@@ -240,7 +239,7 @@ impl Client {
                     let state = state.clone();
                     let event_sink = event_sink.clone();
                     let subscriptions = subscriptions.clone();
-                    let mut output = output.clone();
+                    let output = output.clone();
                     let producers = event_producers.clone();
                     task::spawn(async move {
                         let result = Self::handle_request(
@@ -273,7 +272,7 @@ impl Client {
     ) -> Result<Client> {
         let conn = Connection::new(conn).await?;
         let remote = conn.remote;
-        let mut messages_out = conn.messages_out.clone();
+        let messages_out = conn.messages_out.clone();
         let messages_out2 = conn.messages_out.clone();
         let messages_in = conn.messages_in;
 
@@ -339,7 +338,7 @@ impl Stream for GreedyBuffer {
             return Poll::Ready(None);
         }
 
-        while let Poll::Ready(o) = self.inner.poll_next_unpin(cx) {
+        while let Poll::Ready(o) = self.inner.poll_recv(cx) {
             debug!("GreedyBuffer got Ready({:?})", o);
             match o {
                 Some(e) => {

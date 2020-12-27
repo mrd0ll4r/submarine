@@ -1,7 +1,6 @@
 use crate::Result;
 use prometheus::exponential_buckets;
 use prometheus::{Gauge, GaugeVec, HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec};
-use prometheus_exporter::PrometheusExporter;
 use std::net::SocketAddr;
 use std::thread;
 use std::time::Duration;
@@ -83,11 +82,7 @@ pub(crate) fn start_prometheus(addr: SocketAddr) -> Result<()> {
     thread::Builder::new()
         .name("prom-system-stats".to_string())
         .spawn(track_system_stats)?;
-    thread::Builder::new()
-        .name("prom-exporter".to_string())
-        .spawn(move || {
-            PrometheusExporter::run(&addr).expect("unable to start server for prometheus");
-        })?;
+    prometheus_exporter::start(addr)?;
     Ok(())
 }
 

@@ -1,5 +1,6 @@
 use crate::device::{EventStream, HardwareDevice, VirtualDevice};
 use crate::Result;
+use alloy::config::ValueScaling;
 use alloy::event::{Event, EventKind};
 use alloy::Value;
 use failure::{err_msg, Error};
@@ -7,7 +8,6 @@ use futures::{Stream, StreamExt};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
-use std::time::SystemTime;
 use std::{iter, mem};
 
 /// The core of most hardware devices.
@@ -67,7 +67,7 @@ impl DeviceReadCore {
 
     pub(crate) fn update_value_and_generate_events(
         &mut self,
-        ts: SystemTime,
+        ts: chrono::DateTime<chrono::Utc>,
         index: usize,
         value: Value,
     ) {
@@ -99,7 +99,11 @@ impl HardwareDevice for SynchronizedDeviceReadCore {
         Ok(())
     }
 
-    fn get_virtual_device(&self, port: u8) -> Result<Box<dyn VirtualDevice + Send>> {
+    fn get_virtual_device(
+        &self,
+        port: u8,
+        _scaling: Option<ValueScaling>,
+    ) -> Result<Box<dyn VirtualDevice + Send>> {
         let core = self.lock().unwrap();
         ensure!(
             (port as usize) < core.device_values.len(),
@@ -162,22 +166,24 @@ impl Stream for VirtualDeviceReadCore {
 pub(crate) struct DeviceRWCore {
     pub read_core: DeviceReadCore,
     pub buffered_values: Vec<Value>,
+    pub scalings: Vec<ValueScaling>,
     pub dirty: bool,
     pub err: Option<Error>,
 }
 
 impl DeviceRWCore {
-    pub(crate) fn new(count: usize) -> DeviceRWCore {
+    pub(crate) fn new(count: usize, default_scaling: ValueScaling) -> DeviceRWCore {
         DeviceRWCore {
             read_core: DeviceReadCore::new(count),
             buffered_values: iter::repeat(0).take(count).collect(),
+            scalings: iter::repeat(default_scaling).take(count).collect(),
             dirty: false,
             err: None,
         }
     }
 
-    pub(crate) fn new_dirty(count: usize) -> DeviceRWCore {
-        let mut core = Self::new(count);
+    pub(crate) fn new_dirty(count: usize, default_scaling: ValueScaling) -> DeviceRWCore {
+        let mut core = Self::new(count, default_scaling);
         core.dirty = true;
         core
     }
@@ -195,7 +201,7 @@ impl DeviceRWCore {
     pub(crate) fn finish_update(
         &mut self,
         new_values: Vec<Value>,
-        ts: SystemTime,
+        ts: chrono::DateTime<chrono::Utc>,
         err: Option<Error>,
     ) {
         match err {
@@ -210,7 +216,11 @@ impl DeviceRWCore {
         }
     }
 
-    fn update_and_generate_events(&mut self, new_values: Vec<Value>, ts: SystemTime) {
+    fn update_and_generate_events(
+        &mut self,
+        new_values: Vec<Value>,
+        ts: chrono::DateTime<chrono::Utc>,
+    ) {
         assert_eq!(new_values.len(), self.buffered_values.len());
 
         // generate events
@@ -239,13 +249,20 @@ impl HardwareDevice for SynchronizedDeviceRWCore {
         }
     }
 
-    fn get_virtual_device(&self, port: u8) -> Result<Box<dyn VirtualDevice + Send>> {
-        let core = self.lock().unwrap();
+    fn get_virtual_device(
+        &self,
+        port: u8,
+        scaling: Option<ValueScaling>,
+    ) -> Result<Box<dyn VirtualDevice + Send>> {
+        let mut core = self.lock().unwrap();
         ensure!(
             (port as usize) < core.read_core.device_values.len(),
             "invalid port: {}",
             port
         );
+        if let Some(scaling) = scaling {
+            core.scalings[port as usize] = scaling
+        }
 
         Ok(Box::new(VirtualRWDeviceCore {
             index: port as usize,

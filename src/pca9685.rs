@@ -3,8 +3,10 @@ use crate::device_core::{DeviceRWCore, SynchronizedDeviceRWCore};
 use crate::poll;
 use crate::prom;
 use crate::Result;
-use alloy::Value;
+use alloy::config::ValueScaling;
+use alloy::{Value, HIGH, LOW};
 use embedded_hal as hal;
+use failure::ResultExt;
 use itertools::Itertools;
 use pwm_pca9685 as pwmdev;
 use pwm_pca9685::Pca9685;
@@ -21,6 +23,7 @@ pub struct PCA9685Config {
     inverted: bool,
     output_driver_totem_pole: bool,
     pub update_interval_millis: u64,
+    pub prescale: u8,
 }
 
 pub(crate) fn set_up_device<I2C, E>(i2c: I2C, config: &PCA9685Config) -> Result<Pca9685<I2C>>
@@ -36,52 +39,56 @@ where
         config.update_interval_millis != 0,
         "update_interval_millis must be > 0"
     );
-    let mut dev = pwmdev::Pca9685::new(i2c, addr);
+    let mut dev = pwmdev::Pca9685::new(i2c, addr)
+        .map_err(PCA9685::do_map_err::<I2C, E>)
+        .context("unable to create PCA9685")?;
 
     if config.inverted {
         dev.set_output_logic_state(pwmdev::OutputLogicState::Inverted)
-            .map_err(PCA9685::do_map_err::<I2C, E>)?;
+            .map_err(PCA9685::do_map_err::<I2C, E>)
+            .context("unable to set PCA9685 to inverted mode")?;
     } else {
         dev.set_output_logic_state(pwmdev::OutputLogicState::Direct)
-            .map_err(PCA9685::do_map_err::<I2C, E>)?;
+            .map_err(PCA9685::do_map_err::<I2C, E>)
+            .context("unable to set PCA9685 to non-inverted mode")?;
     }
 
     if config.output_driver_totem_pole {
         dev.set_output_driver(pwmdev::OutputDriver::TotemPole)
-            .map_err(PCA9685::do_map_err::<I2C, E>)?;
+            .map_err(PCA9685::do_map_err::<I2C, E>)
+            .context("unable to set PCA9685 to totem pole")?;
     } else {
         dev.set_output_driver(pwmdev::OutputDriver::OpenDrain)
-            .map_err(PCA9685::do_map_err::<I2C, E>)?;
+            .map_err(PCA9685::do_map_err::<I2C, E>)
+            .context("unable to set PCA9685 to open drain")?;
     }
 
     if config.use_external_clock {
         dev.use_external_clock()
-            .map_err(PCA9685::do_map_err::<I2C, E>)?;
+            .map_err(PCA9685::do_map_err::<I2C, E>)
+            .context("unable to set PCA9685 to external clock")?;
     }
 
-    dev.enable().map_err(PCA9685::do_map_err::<I2C, E>)?;
+    dev.enable()
+        .map_err(PCA9685::do_map_err::<I2C, E>)
+        .context("unable to enable PCA9685")?;
 
     // This needs to be set after the device is enabled, for some reason.
-    dev.set_prescale(3).map_err(PCA9685::do_map_err::<I2C, E>)?;
+    dev.set_prescale(config.prescale)
+        .map_err(PCA9685::do_map_err::<I2C, E>)
+        .context("unable to set PCA9685 prescale")?;
 
     Ok(dev)
 }
 
 impl PCA9685Config {
-    pub(crate) fn slave_address(&self) -> Result<pwmdev::SlaveAddr> {
+    pub(crate) fn slave_address(&self) -> Result<pwmdev::Address> {
         let addr = self.i2c_slave_address;
         // PCA9685 has 0b1 fixed, and I2C addresses are 7 bits long,
         // so we check for a 0b01 prefix.
         ensure!((addr >> 6) ^ 0b01 == 0, "invalid address");
 
-        Ok(pwmdev::SlaveAddr::Alternative(
-            addr & 0b0010_0000 != 0,
-            addr & 0b0001_0000 != 0,
-            addr & 0b0000_1000 != 0,
-            addr & 0b0000_0100 != 0,
-            addr & 0b0000_0010 != 0,
-            addr & 0b0000_0001 != 0,
-        ))
+        Ok(pwmdev::Address::from(addr))
     }
 }
 
@@ -100,7 +107,10 @@ impl PCA9685 {
     {
         let dev = set_up_device(dev, config)?;
 
-        let inner = Arc::new(Mutex::new(DeviceRWCore::new_dirty(16)));
+        let inner = Arc::new(Mutex::new(DeviceRWCore::new_dirty(
+            16,
+            ValueScaling::Logarithmic,
+        )));
         let inner_thread = inner.clone();
 
         let update_interval_milliseconds = config.update_interval_millis;
@@ -134,11 +144,12 @@ impl PCA9685 {
             .unwrap();
 
         loop {
-            let (wake_up, values, dirty) =
+            let (wake_up, values, scalings, dirty) =
                 poll::poll_loop_begin(module_path!(), sleep_duration, &mut last_wakeup, &core);
 
             // Do the actual update
-            let res = Self::handle_update_async_inner_outer(&values, dirty, &mut dev, &hist);
+            let res =
+                Self::handle_update_async_inner_outer(&values, scalings, dirty, &mut dev, &hist);
 
             sleep_duration =
                 poll::poll_loop_end(module_path!(), res, &core, values, wake_up, update_interval);
@@ -147,6 +158,7 @@ impl PCA9685 {
 
     pub(crate) fn handle_update_async_inner_outer<I2C, E>(
         values: &[Value],
+        scalings: Vec<ValueScaling>,
         dirty: bool,
         dev: &mut Pca9685<I2C>,
         metric: &prometheus::Histogram,
@@ -167,11 +179,12 @@ impl PCA9685 {
         // Debug print
         debug!("values: [{}]", values.iter().join(", "));
 
-        Self::handle_update_async_inner(values, dev, metric)
+        Self::handle_update_async_inner(values, scalings, dev, metric)
     }
 
     fn handle_update_async_inner<I2C, E>(
         values: &[Value],
+        scalings: Vec<ValueScaling>,
         dev: &mut pwmdev::Pca9685<I2C>,
         metric: &prometheus::Histogram,
     ) -> Result<()>
@@ -183,7 +196,7 @@ impl PCA9685 {
         E: Sync + Send + std::fmt::Debug + 'static,
     {
         // Calculate ON/OFF values
-        let start_stop_values = Self::calculate_on_off_values(&values);
+        let start_stop_values = Self::calculate_on_off_values(&values, scalings);
         assert_eq!(start_stop_values.len(), 32);
         debug!(
             "start_stop values: [{}]",
@@ -228,7 +241,7 @@ impl PCA9685 {
         }
     }
 
-    fn calculate_on_off_values(values: &[Value]) -> Vec<u16> {
+    fn calculate_on_off_values(values: &[Value], scalings: Vec<ValueScaling>) -> Vec<u16> {
         // TODO figure this out - use offsets to balance stuff?
         /*let offsets: Vec<u16> = (0..16_usize)
         .map(|n| Self::OFFSET[n % 4] + Self::OFFSET[n / 4])
@@ -243,18 +256,35 @@ impl PCA9685 {
             */
         values
             .iter()
-            .map(|v| {
-                // Apply logarithmic scaling according to https://www.mikrocontroller.net/articles/LED-Fading
-                // First, special-case MIN and MAX because they are probably common...
-                if *v == std::u16::MIN {
-                    std::u16::MIN
-                } else if *v == std::u16::MAX {
-                    4095
-                } else {
-                    // pow(2, log2(b-1) * (x+1) / a)
-                    2_f64
-                        .powf((4096_f64 - 1_f64).log2() * (*v as f64 + 1_f64) / 65536_f64)
-                        .floor() as u16
+            .zip(scalings.into_iter())
+            .map(|(v, scaling)| {
+                match scaling {
+                    ValueScaling::Linear { from, to } => {
+                        if from == LOW && to == HIGH {
+                            return *v >> 4;
+                        }
+                        let scaled = alloy::map_range(
+                            (LOW as f64, HIGH as f64),
+                            (from as f64, to as f64),
+                            *v as f64,
+                        )
+                        .floor() as u16;
+                        scaled >> 4
+                    }
+                    ValueScaling::Logarithmic => {
+                        // Apply logarithmic scaling according to https://www.mikrocontroller.net/articles/LED-Fading
+                        // First, special-case MIN and MAX because they are probably common...
+                        if *v == std::u16::MIN {
+                            std::u16::MIN
+                        } else if *v == std::u16::MAX {
+                            4095
+                        } else {
+                            // pow(2, log2(b-1) * (x+1) / a)
+                            2_f64
+                                .powf((4096_f64 - 1_f64).log2() * (*v as f64 + 1_f64) / 65536_f64)
+                                .floor() as u16
+                        }
+                    }
                 }
             })
             .flat_map(|v| vec![0, v])
@@ -270,9 +300,13 @@ impl HardwareDevice for PCA9685 {
         self.core.update()
     }
 
-    fn get_virtual_device(&self, port: u8) -> Result<Box<dyn VirtualDevice + Send>> {
+    fn get_virtual_device(
+        &self,
+        port: u8,
+        scaling: Option<ValueScaling>,
+    ) -> Result<Box<dyn VirtualDevice + Send>> {
         ensure!(port < 16, "PCA9685 has 16 ports only");
-        self.core.get_virtual_device(port)
+        self.core.get_virtual_device(port, scaling)
     }
 
     fn get_event_stream(&self, port: u8) -> Result<EventStream> {

@@ -5,7 +5,7 @@ use embedded_hal as hal;
 use prometheus::Histogram;
 use pwm_pca9685::Pca9685;
 use std::thread;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 pub(crate) struct PCA9685Synchronized<I2C> {
     cores: Vec<(SynchronizedDeviceRWCore, Pca9685<I2C>, Histogram, String)>,
@@ -58,14 +58,15 @@ where
         loop {
             let wake_up =
                 poll::poll_loop_begin_sleep(module_path!(), sleep_duration, &mut last_wakeup);
-            let ts = SystemTime::now();
+            let ts = chrono::Utc::now();
 
             for (i, tuple) in cores.iter_mut().enumerate() {
                 let (ref mut core, ref mut dev, ref hist, ref alias) = tuple;
-                let (values, dirty) = poll::get_values_and_dirty(core);
+                let (values, scalings, dirty) = poll::get_values_and_dirty(core);
 
                 // Do the actual update
-                let res = PCA9685::handle_update_async_inner_outer(&values, dirty, dev, hist);
+                let res =
+                    PCA9685::handle_update_async_inner_outer(&values, scalings, dirty, dev, hist);
                 debug!(
                     "updated PCA9685 {} ({} of {}): {:?}",
                     alias,

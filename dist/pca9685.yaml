@@ -1,7 +1,7 @@
 config:
   devices:
     - type: pca9685_synchronized
-      alias: pca9685-0
+      alias: pca9685-servo
       config:
         i2c_bus: ""
         i2c_slave_address: 64
@@ -9,6 +9,7 @@ config:
         inverted: true
         output_driver_totem_pole: true
         update_interval_millis: 5
+        prescale: 100
     - type: pca9685_synchronized
       alias: pca9685-1
       config:
@@ -18,6 +19,7 @@ config:
         inverted: true
         output_driver_totem_pole: true
         update_interval_millis: 5
+        prescale: 3
     - type: pca9685_synchronized
       alias: pca9685-2
       config:
@@ -27,29 +29,8 @@ config:
         inverted: true
         output_driver_totem_pole: true
         update_interval_millis: 5
+        prescale: 3
   virtual_devices:
-    - address: 20
-      alias: strip0-y
-      groups: ["strip0","strip-y"]
-      mapping:
-        device: pca9685-0
-        port: 0
-      read_only: false
-    - address: 21
-      alias: strip0-r
-      groups: ["strip0","strip-r"]
-      mapping:
-        device: pca9685-0
-        port: 1
-      read_only: false
-    - address: 22
-      alias: strip0-g
-      groups: ["strip0","strip-g"]
-      mapping:
-        device: pca9685-0
-        port: 2
-      read_only: false
-
     - address: 23
       alias: strip1-y
       groups: ["strip1","strip-y"]

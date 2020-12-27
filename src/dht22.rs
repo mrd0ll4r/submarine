@@ -2,6 +2,7 @@ use crate::device::{EventStream, HardwareDevice, VirtualDevice};
 use crate::device_core::{DeviceReadCore, SynchronizedDeviceReadCore};
 use crate::dht22_lib::ReadingError;
 use crate::{dht22_lib, prom, Result};
+use alloy::config::ValueScaling;
 use failure::ResultExt;
 use rand::Rng;
 use rppal::gpio;
@@ -9,7 +10,7 @@ use rppal::gpio::{Gpio, Mode};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 /// Configuration for a DHT22 (actually AM2302) temperature/humidity sensor.
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -83,7 +84,7 @@ impl DHT22 {
             prom::DHT22_MEASUREMENTS.with_label_values(&[alias.as_str(), "suspicious_value"]);
 
         // de-sync in case we have multiple of these
-        let millis = rand::thread_rng().gen_range(0, 1000);
+        let millis = rand::thread_rng().gen_range(0..1000);
         debug!("will sleep {}ms to de-sync", millis);
         thread::sleep(Duration::from_millis(millis));
 
@@ -96,7 +97,7 @@ impl DHT22 {
                 dht22_lib::read_pin(&mut pin, adjust_priority)
             };
             // Take this timestamp after the reading, because that takes a few milliseconds.
-            let ts = SystemTime::now();
+            let ts = chrono::Utc::now();
 
             match readings {
                 Ok(readings) => {
@@ -146,9 +147,13 @@ impl HardwareDevice for DHT22 {
         Ok(())
     }
 
-    fn get_virtual_device(&self, port: u8) -> Result<Box<dyn VirtualDevice + Send>> {
+    fn get_virtual_device(
+        &self,
+        port: u8,
+        _scaling: Option<ValueScaling>,
+    ) -> Result<Box<dyn VirtualDevice + Send>> {
         ensure!(port < 2, "DHT22 has two ports: 0=>temperature, 1=>humidity");
-        self.core.get_virtual_device(port)
+        self.core.get_virtual_device(port, _scaling)
     }
 
     fn get_event_stream(&self, port: u8) -> Result<EventStream> {

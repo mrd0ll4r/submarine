@@ -6,37 +6,38 @@ edition = "2018"
 
 [dependencies]
 # Core
-failure = {version="0.1.7", features=["std","backtrace"]}
-log = {version = "0.4.8", features = ["std","serde"]}
-flexi_logger = {version="0.14.7",features=["ziplogs"]}
-itertools = "0.8.2"
-rand = "0.7.2"
-alloy = {git = "https://github.com/mrd0ll4r/alloy"}
-#alloy = {path = "../alloy"}
+failure = {version="0.1", features=["std","backtrace"]}
+log = {version = "0.4", features = ["std","serde"]}
+flexi_logger = {version="0.16",features=["compress"]}
+itertools = "0.9"
+rand = "0.8"
+#alloy = {git = "https://github.com/mrd0ll4r/alloy"}
+alloy = {path = "../alloy"}
 
 # Serde
-serde = {version="1.0.104",features=["derive"]}
-serde_json = "1.0.46"
-serde_yaml = "0.8.11"
+serde = {version="1",features=["derive"]}
+serde_json = "1"
+serde_yaml = "0.8"
 
 # API/Tokio/TCP
-tokio = { version = "0.2.11", features = ["full"] }
-tokio-util = {version="0.2.0", features=["codec"]}
-futures = "0.3.3"
-tide = "0.6"
-http = "0.2.0"
-bytes = "0.5.4"
+tokio = { version = "1", features = ["full"] }
+tokio-util = {version="0.6", features=["codec"]}
+futures = "0.3"
+tide = "0.15"
+http = "0.2"
+bytes = "1"
+chrono = "0.4"
 
 # Hardware
-embedded-hal = "0.2.3"
-linux-embedded-hal = "0.3.0"
-rppal = "0.11.3"
-pwm-pca9685 = "0.2.0"
+embedded-hal = "0.2"
+linux-embedded-hal = "0.3"
+rppal = "0.11"
+pwm-pca9685 = "0.3"
 mcp23017 = {git ="https://github.com/mrd0ll4r/mcp23017"}
-libc = "0.2.66"
+libc = "0.2"
 
 # Prometheus, metrics
-prometheus_exporter = "0.4.1"
-prometheus = {version="0.7.0",features=["process"]}
-lazy_static = "1.4.0"
-systemstat = "0.1.5"
+prometheus_exporter = "0.7.2"
+prometheus = {version="0.10.0",features=["process"]}
+lazy_static = "1"
+systemstat = "0.1"

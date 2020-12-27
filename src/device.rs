@@ -6,7 +6,7 @@ use crate::pca9685::PCA9685Config;
 use crate::pca9685_sync::PCA9685Synchronized;
 use crate::Result;
 use crate::{config, i2c_mock, mcp23017, mcp23017_input, pca9685};
-use alloy::config::{MappingConfig, VirtualDeviceConfig};
+use alloy::config::{MappingConfig, ValueScaling, VirtualDeviceConfig};
 use alloy::event::Event;
 use alloy::{Address, Value};
 use failure::{format_err, ResultExt};
@@ -32,7 +32,11 @@ pub(crate) trait HardwareDevice {
     ///
     /// Both `get_virtual_device` and `get_event_stream` are generally implemented using device
     /// cores.
-    fn get_virtual_device(&self, port: u8) -> Result<Box<dyn VirtualDevice + Send>>;
+    fn get_virtual_device(
+        &self,
+        port: u8,
+        scaling: Option<ValueScaling>,
+    ) -> Result<Box<dyn VirtualDevice + Send>>;
 
     /// Gets an EventStream for the given port.
     ///
@@ -267,7 +271,10 @@ impl DeviceState {
                     let i2c_bus = cfg.i2c_bus.to_lowercase();
                     debug!("normalized I2C bus to {}", i2c_bus);
 
-                    let core = Arc::new(Mutex::new(DeviceRWCore::new_dirty(16)));
+                    let core = Arc::new(Mutex::new(DeviceRWCore::new_dirty(
+                        16,
+                        ValueScaling::Logarithmic,
+                    )));
                     synchronized_pca9685s.entry(i2c_bus).or_default().push((
                         core.clone(),
                         cfg.clone(),
@@ -423,8 +430,8 @@ impl DeviceState {
 
         for cfg in configs.iter_mut() {
             debug!(
-                "creating virtual device {} at address {}, mapped at {}:{}",
-                cfg.alias, cfg.address, cfg.mapping.device, cfg.mapping.port
+                "creating virtual device {} at address {}, mapped at {}:{} with scaling {:?}",
+                cfg.alias, cfg.address, cfg.mapping.device, cfg.mapping.port, cfg.mapping.scaling
             );
 
             cfg.alias = cfg.alias.to_lowercase();
@@ -432,6 +439,7 @@ impl DeviceState {
             cfg.mapping = MappingConfig {
                 device: cfg.mapping.device.to_lowercase(),
                 port: cfg.mapping.port,
+                scaling: cfg.mapping.scaling.clone(),
             };
             debug!("normalized mapping to {:?}", cfg.mapping);
             cfg.groups = cfg.groups.iter().map(|x| x.to_lowercase()).collect_vec();
@@ -464,7 +472,7 @@ impl DeviceState {
                 )
             })?;
             let vdev = hw_dev
-                .get_virtual_device(cfg.mapping.port)
+                .get_virtual_device(cfg.mapping.port, cfg.mapping.scaling.clone())
                 .context(format!(
                     "unable to create virtual device at mapping {}:{}",
                     cfg.mapping.device, cfg.mapping.port

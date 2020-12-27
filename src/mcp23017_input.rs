@@ -3,6 +3,7 @@ use crate::device_core::{DeviceReadCore, SynchronizedDeviceReadCore};
 use crate::mcp23017::{MCP23017Config, MCP23017};
 use crate::prom;
 use crate::{poll, Result};
+use alloy::config::ValueScaling;
 use alloy::event::{ButtonEvent, Event, EventKind};
 use alloy::{HIGH, LOW};
 use embedded_hal as hal;
@@ -13,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 pub(crate) struct MCP23017Input {
     inner: SynchronizedDeviceReadCore,
@@ -114,8 +115,12 @@ impl MCP23017Input {
         loop {
             thread::sleep(sleep_duration);
             let wake_up = Instant::now();
-            let ts = SystemTime::now();
-            trace!("{} µs since last loop", (wake_up - last_wakeup).as_micros());
+            let ts = chrono::Utc::now();
+            trace!(
+                "{}: {} µs since last loop",
+                alias,
+                (wake_up - last_wakeup).as_micros()
+            );
             last_wakeup = wake_up;
 
             let mut state = inner.lock().unwrap();
@@ -129,15 +134,20 @@ impl MCP23017Input {
                 &hist,
                 &mut down,
                 &mut down_secs,
+                &alias,
             );
 
             if let Err(e) = res {
-                warn!("unable to read values: {:?}", e);
+                warn!("{}: unable to read values: {:?}", alias, e);
             }
 
             let (s, lagging) = poll::calculate_sleep_duration(wake_up, polling_interval);
             if lagging > Duration::from_secs(0) {
-                warn!("took too long, lagging {}µs behind", lagging.as_micros());
+                warn!(
+                    "{}: took too long, lagging {}µs behind",
+                    alias,
+                    lagging.as_micros()
+                );
             }
             sleep_duration = s;
         }
@@ -146,11 +156,12 @@ impl MCP23017Input {
     fn update_inner<I2C, E>(
         state: &mut DeviceReadCore,
         mono_ts: Instant,
-        real_ts: SystemTime,
+        real_ts: chrono::DateTime<chrono::Utc>,
         dev: &mut mcpdev::MCP23017<I2C>,
         hist: &prometheus::Histogram,
         down: &mut [Instant; 16],
         down_secs: &mut [u64; 16],
+        alias: &str,
     ) -> Result<()>
     where
         I2C: hal::blocking::i2c::Write<Error = E>
@@ -166,14 +177,15 @@ impl MCP23017Input {
         let after = Instant::now();
         hist.observe(after.duration_since(before).as_micros() as f64);
         debug!(
-            "read_gpioab took {}µs => {}KiBit/s",
+            "{}: read_gpioab took {}µs => {}KiBit/s",
+            alias,
             after.duration_since(before).as_micros(),
             ((2 * 8) as f64 / after.duration_since(before).as_secs_f64()) / 1024_f64
         );
 
         let (high, low) = (((vals >> 8) & 0xFF) as u8, (vals & 0xFF) as u8);
         let vals = (low as u16) << 8 | high as u16;
-        trace!("read values: {:#018b}", vals);
+        trace!("{}: read values: {:#018b}", alias, vals);
 
         let mut new_values = [false; 16];
         for (i, val) in new_values.iter_mut().enumerate() {
@@ -236,9 +248,13 @@ impl HardwareDevice for MCP23017Input {
         Ok(())
     }
 
-    fn get_virtual_device(&self, port: u8) -> Result<Box<dyn VirtualDevice + Send>> {
+    fn get_virtual_device(
+        &self,
+        port: u8,
+        _scaling: Option<ValueScaling>,
+    ) -> Result<Box<dyn VirtualDevice + Send>> {
         ensure!(port < 16, "MCP23017 has 16 ports only");
-        self.inner.get_virtual_device(port)
+        self.inner.get_virtual_device(port, _scaling)
     }
 
     fn get_event_stream(&self, port: u8) -> Result<Pin<Box<dyn Stream<Item = Vec<Event>> + Send>>> {

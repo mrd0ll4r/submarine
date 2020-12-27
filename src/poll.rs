@@ -1,14 +1,21 @@
 use crate::device_core::SynchronizedDeviceRWCore;
 use crate::Result;
+use alloy::config::ValueScaling;
 use alloy::Value;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 use std::{thread, time};
 
-pub(crate) fn get_values_and_dirty(core: &SynchronizedDeviceRWCore) -> (Vec<Value>, bool) {
+pub(crate) fn get_values_and_dirty(
+    core: &SynchronizedDeviceRWCore,
+) -> (Vec<Value>, Vec<ValueScaling>, bool) {
     let mut core = core.lock().unwrap();
-    let (values, dirty) = (core.buffered_values.clone(), core.dirty);
+    let (values, scalings, dirty) = (
+        core.buffered_values.clone(),
+        core.scalings.clone(),
+        core.dirty,
+    );
     core.dirty = false;
-    (values, dirty)
+    (values, scalings, dirty)
 }
 
 pub(crate) fn calculate_sleep_duration(
@@ -46,11 +53,11 @@ pub(crate) fn poll_loop_begin(
     sleep_duration: Duration,
     last_wakeup: &mut Instant,
     core: &SynchronizedDeviceRWCore,
-) -> (Instant, Vec<Value>, bool) {
+) -> (Instant, Vec<Value>, Vec<ValueScaling>, bool) {
     let wake_up = poll_loop_begin_sleep(module_name, sleep_duration, last_wakeup);
 
-    let (values, dirty) = get_values_and_dirty(core);
-    (wake_up, values, dirty)
+    let (values, scalings, dirty) = get_values_and_dirty(core);
+    (wake_up, values, scalings, dirty)
 }
 
 pub(crate) fn poll_loop_end(
@@ -63,7 +70,7 @@ pub(crate) fn poll_loop_end(
 ) -> Duration {
     debug!(target: module_name, "updated: {:?}", update_result);
 
-    let ts = SystemTime::now();
+    let ts = chrono::Utc::now();
 
     // Update device values, generate events, populate error in case something went wrong.
     {

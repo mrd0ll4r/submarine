@@ -24,9 +24,18 @@ pub struct PCA9685Config {
     output_driver_totem_pole: bool,
     pub update_interval_millis: u64,
     pub prescale: u8,
+    #[serde(default)]
+    pub sleep_after_millis: Option<u64>,
 }
 
-pub(crate) fn set_up_device<I2C, E>(i2c: I2C, config: &PCA9685Config) -> Result<Pca9685<I2C>>
+pub struct Pca9685Device<I2C> {
+    dev: Pca9685<I2C>,
+    last_change: Instant,
+    device_enabled: bool,
+    sleep_after: Option<Duration>,
+}
+
+pub(crate) fn set_up_device<I2C, E>(i2c: I2C, config: &PCA9685Config) -> Result<Pca9685Device<I2C>>
 where
     I2C: hal::blocking::i2c::Write<Error = E>
         + Send
@@ -78,7 +87,15 @@ where
         .map_err(PCA9685::do_map_err::<I2C, E>)
         .context("unable to set PCA9685 prescale")?;
 
-    Ok(dev)
+    Ok(Pca9685Device {
+        dev,
+        last_change: Instant::now(),
+        device_enabled: true,
+        sleep_after: config
+            .sleep_after_millis
+            .clone()
+            .map(|millis| Duration::from_millis(millis)),
+    })
 }
 
 impl PCA9685Config {
@@ -125,7 +142,7 @@ impl PCA9685 {
 
     fn handle_update_async<I2C, E>(
         core: SynchronizedDeviceRWCore,
-        mut dev: Pca9685<I2C>,
+        mut dev: Pca9685Device<I2C>,
         update_interval_milliseconds: u64,
         alias: String,
     ) -> Result<()>
@@ -151,6 +168,8 @@ impl PCA9685 {
             let res =
                 Self::handle_update_async_inner_outer(&values, scalings, dirty, &mut dev, &hist);
 
+            // TODO if nothing has changed for some time, set to sleep
+
             sleep_duration =
                 poll::poll_loop_end(module_path!(), res, &core, values, wake_up, update_interval);
         }
@@ -160,7 +179,7 @@ impl PCA9685 {
         values: &[Value],
         scalings: Vec<ValueScaling>,
         dirty: bool,
-        dev: &mut Pca9685<I2C>,
+        dev: &mut Pca9685Device<I2C>,
         metric: &prometheus::Histogram,
     ) -> Result<()>
     where
@@ -173,13 +192,36 @@ impl PCA9685 {
         assert_eq!(values.len(), 16);
 
         if !dirty {
+            if let Some(sleep_after) = dev.sleep_after {
+                if dev.device_enabled && dev.last_change.elapsed() > sleep_after {
+                    debug!("putting PCA to sleep...");
+                    dev.dev
+                        .enable_restart_and_disable()
+                        .map_err(Self::do_map_err::<I2C, E>)
+                        .context("unable to put PCA to sleep")?;
+                    dev.device_enabled = false
+                }
+            }
             return Ok(());
+        }
+
+        if !dev.device_enabled {
+            debug!("restarting PCA...");
+            dev.dev
+                .restart(&mut linux_embedded_hal::Delay {})
+                .map_err(Self::do_map_err::<I2C, E>)
+                .context("unable to restart PCA")?;
+            dev.device_enabled = true;
         }
 
         // Debug print
         debug!("values: [{}]", values.iter().join(", "));
 
-        Self::handle_update_async_inner(values, scalings, dev, metric)
+        Self::handle_update_async_inner(values, scalings, &mut dev.dev, metric)
+            .context("unable to update PCA")?;
+        dev.last_change = Instant::now();
+
+        Ok(())
     }
 
     fn handle_update_async_inner<I2C, E>(

@@ -1,14 +1,18 @@
 use crate::device_core::SynchronizedDeviceRWCore;
-use crate::pca9685::{PCA9685Config, PCA9685};
+use crate::pca9685::{PCA9685Config, Pca9685Device, PCA9685};
 use crate::{pca9685, poll, prom, Result};
 use embedded_hal as hal;
 use prometheus::Histogram;
-use pwm_pca9685::Pca9685;
 use std::thread;
 use std::time::{Duration, Instant};
 
 pub(crate) struct PCA9685Synchronized<I2C> {
-    cores: Vec<(SynchronizedDeviceRWCore, Pca9685<I2C>, Histogram, String)>,
+    cores: Vec<(
+        SynchronizedDeviceRWCore,
+        Pca9685Device<I2C>,
+        Histogram,
+        String,
+    )>,
 }
 
 impl<I2C, E> PCA9685Synchronized<I2C>
@@ -48,7 +52,12 @@ where
     }
 
     fn handle_update_async(
-        mut cores: Vec<(SynchronizedDeviceRWCore, Pca9685<I2C>, Histogram, String)>,
+        mut cores: Vec<(
+            SynchronizedDeviceRWCore,
+            Pca9685Device<I2C>,
+            Histogram,
+            String,
+        )>,
         update_interval_millis: u64,
     ) -> Result<()> {
         let update_interval = Duration::from_millis(update_interval_millis);

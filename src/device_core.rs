@@ -188,12 +188,16 @@ impl DeviceRWCore {
         core
     }
 
-    /// Sets a value in the value buffer and sets the dirty bit.
+    /// Sets a value in the value buffer and sets the dirty bit if the new values is different than
+    /// the buffered value.
     ///
     /// Panics on invalid index.
     pub(crate) fn set(&mut self, index: usize, value: Value) {
+        let old_val = self.buffered_values[index];
         self.buffered_values[index] = value;
-        self.dirty = true;
+        if value != old_val {
+            self.dirty = true;
+        }
     }
 
     /// Transfers new values to the device values for future reads, generates change events, and

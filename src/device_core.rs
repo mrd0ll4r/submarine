@@ -5,24 +5,28 @@ use alloy::event::{Event, EventKind};
 use alloy::Value;
 use failure::{err_msg, Error};
 use futures::{Stream, StreamExt};
+use std::collections::VecDeque;
+use std::iter;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
-use std::{iter, mem};
 
 /// The core of most hardware devices.
 ///
 /// This core is read-only, i.e. for sensors, but is also used as the base of the read/write core.
 /// It handles device values (the values last read from/written to a device), and events.
+#[derive(Debug)]
 pub(crate) struct DeviceReadCore {
+    pub alias: String,
     pub device_values: Vec<Value>,
-    pub events: Vec<Option<Vec<Event>>>,
+    pub events: Vec<Option<VecDeque<Event>>>,
     pub wakers: Vec<Option<Waker>>,
 }
 
 impl DeviceReadCore {
-    pub(crate) fn new(count: usize) -> DeviceReadCore {
+    pub(crate) fn new(alias: String, count: usize) -> DeviceReadCore {
         DeviceReadCore {
+            alias,
             device_values: iter::repeat(0).take(count).collect(),
             events: iter::repeat(None).take(count).collect(),
             wakers: iter::repeat(None).take(count).collect(),
@@ -37,7 +41,7 @@ impl DeviceReadCore {
             index
         );
 
-        self.events[index] = Some(Vec::new());
+        self.events[index] = Some(VecDeque::new());
 
         Ok(())
     }
@@ -46,23 +50,19 @@ impl DeviceReadCore {
         &mut self,
         cx: &mut Context<'_>,
         index: usize,
-    ) -> Poll<Option<Vec<Event>>> {
+    ) -> Poll<Option<Event>> {
         // check whether events are actually set up (this should hopefully always work)
-        let state = self;
-        let event_queue: &mut Vec<Event> = state.events[index]
+        let event = self.events[index]
             .as_mut()
-            .expect("events for this index not set up");
-
-        // check for events
-        if event_queue.is_empty() {
-            // no events -> put our waker somewhere, in case events arrive at some point
-            state.wakers[index] = Some(cx.waker().clone());
-            return Poll::Pending;
+            .expect("events for this port not set up")
+            .pop_front();
+        match event {
+            None => {
+                self.wakers[index] = Some(cx.waker().clone());
+                return Poll::Pending;
+            }
+            Some(event) => Poll::Ready(Some(event)),
         }
-
-        // we have events -> get and return them
-        let events = mem::replace(event_queue, Vec::new());
-        Poll::Ready(Some(events))
     }
 
     pub(crate) fn update_value_and_generate_events(
@@ -73,7 +73,7 @@ impl DeviceReadCore {
     ) {
         if let Some(events) = &mut self.events[index] {
             if value != self.device_values[index] {
-                events.push(Event {
+                events.push_back(Event {
                     timestamp: ts,
                     inner: EventKind::Change { new_value: value },
                 });
@@ -95,6 +95,10 @@ impl DeviceReadCore {
 pub(crate) type SynchronizedDeviceReadCore = Arc<Mutex<DeviceReadCore>>;
 
 impl HardwareDevice for SynchronizedDeviceReadCore {
+    fn alias(&self) -> String {
+        self.lock().unwrap().alias.clone()
+    }
+
     fn update(&self) -> Result<()> {
         Ok(())
     }
@@ -103,34 +107,28 @@ impl HardwareDevice for SynchronizedDeviceReadCore {
         &self,
         port: u8,
         _scaling: Option<ValueScaling>,
-    ) -> Result<Box<dyn VirtualDevice + Send>> {
-        let core = self.lock().unwrap();
+    ) -> Result<(Box<dyn VirtualDevice>, EventStream)> {
+        let mut core = self.lock().unwrap();
         ensure!(
             (port as usize) < core.device_values.len(),
             "invalid port: {}",
             port
         );
 
-        Ok(Box::new(VirtualDeviceReadCore {
+        core.set_up_events(port as usize)
+            .expect("unable to set up events");
+
+        let dev = VirtualDeviceReadCore {
             index: port as usize,
             core: self.clone(),
-        }))
-    }
+        };
 
-    fn get_event_stream(&self, port: u8) -> Result<EventStream> {
-        let mut core = self.lock().unwrap();
-
-        core.set_up_events(port as usize)?;
-
-        Ok(VirtualDeviceReadCore {
-            index: port as usize,
-            core: self.clone(),
-        }
-        .boxed())
+        Ok((Box::new(dev.clone()), dev.boxed()))
     }
 }
 
 /// A virtual device derived from a read-only core.
+#[derive(Clone, Debug)]
 struct VirtualDeviceReadCore {
     index: usize,
     core: SynchronizedDeviceReadCore,
@@ -150,7 +148,7 @@ impl VirtualDevice for VirtualDeviceReadCore {
 }
 
 impl Stream for VirtualDeviceReadCore {
-    type Item = Vec<Event>;
+    type Item = Event;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut core = self.core.lock().unwrap();
@@ -163,6 +161,7 @@ impl Stream for VirtualDeviceReadCore {
 ///
 /// This handles setting values to a buffer, keeping track of the dirtiness of that buffer, and of
 /// possible errors from earlier updates.
+#[derive(Debug)]
 pub(crate) struct DeviceRWCore {
     pub read_core: DeviceReadCore,
     pub buffered_values: Vec<Value>,
@@ -172,9 +171,9 @@ pub(crate) struct DeviceRWCore {
 }
 
 impl DeviceRWCore {
-    pub(crate) fn new(count: usize, default_scaling: ValueScaling) -> DeviceRWCore {
+    pub(crate) fn new(alias: String, count: usize, default_scaling: ValueScaling) -> DeviceRWCore {
         DeviceRWCore {
-            read_core: DeviceReadCore::new(count),
+            read_core: DeviceReadCore::new(alias, count),
             buffered_values: iter::repeat(0).take(count).collect(),
             scalings: iter::repeat(default_scaling).take(count).collect(),
             dirty: false,
@@ -182,8 +181,12 @@ impl DeviceRWCore {
         }
     }
 
-    pub(crate) fn new_dirty(count: usize, default_scaling: ValueScaling) -> DeviceRWCore {
-        let mut core = Self::new(count, default_scaling);
+    pub(crate) fn new_dirty(
+        alias: String,
+        count: usize,
+        default_scaling: ValueScaling,
+    ) -> DeviceRWCore {
+        let mut core = Self::new(alias, count, default_scaling);
         core.dirty = true;
         core
     }
@@ -241,6 +244,9 @@ impl DeviceRWCore {
 pub(crate) type SynchronizedDeviceRWCore = Arc<Mutex<DeviceRWCore>>;
 
 impl HardwareDevice for SynchronizedDeviceRWCore {
+    fn alias(&self) -> String {
+        self.lock().unwrap().read_core.alias.clone()
+    }
     fn update(&self) -> Result<()> {
         let err = {
             let mut core = self.lock().unwrap();
@@ -257,7 +263,7 @@ impl HardwareDevice for SynchronizedDeviceRWCore {
         &self,
         port: u8,
         scaling: Option<ValueScaling>,
-    ) -> Result<Box<dyn VirtualDevice + Send>> {
+    ) -> Result<(Box<dyn VirtualDevice>, EventStream)> {
         let mut core = self.lock().unwrap();
         ensure!(
             (port as usize) < core.read_core.device_values.len(),
@@ -268,26 +274,21 @@ impl HardwareDevice for SynchronizedDeviceRWCore {
             core.scalings[port as usize] = scaling
         }
 
-        Ok(Box::new(VirtualRWDeviceCore {
+        core.read_core
+            .set_up_events(port as usize)
+            .expect("unable to set up events");
+
+        let dev = VirtualRWDeviceCore {
             index: port as usize,
             core: self.clone(),
-        }))
-    }
+        };
 
-    fn get_event_stream(&self, port: u8) -> Result<EventStream> {
-        let mut core = self.lock().unwrap();
-
-        core.read_core.set_up_events(port as usize)?;
-
-        Ok(VirtualRWDeviceCore {
-            index: port as usize,
-            core: self.clone(),
-        }
-        .boxed())
+        Ok((Box::new(dev.clone()), dev.boxed()))
     }
 }
 
 /// The virtual device derived from a R/W device core.
+#[derive(Clone, Debug)]
 struct VirtualRWDeviceCore {
     index: usize,
     core: SynchronizedDeviceRWCore,
@@ -311,7 +312,7 @@ impl VirtualDevice for VirtualRWDeviceCore {
 }
 
 impl Stream for VirtualRWDeviceCore {
-    type Item = Vec<Event>;
+    type Item = Event;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut core = self.core.lock().unwrap();

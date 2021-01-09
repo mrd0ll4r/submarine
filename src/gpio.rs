@@ -53,7 +53,7 @@ impl GPIO {
             PullUpDown::Down => pin.into_input_pulldown(),
         };
 
-        let core = Arc::new(Mutex::new(DeviceReadCore::new(1)));
+        let core = Arc::new(Mutex::new(DeviceReadCore::new(alias.clone(), 1)));
         let thread_core = core.clone();
         let readout_interval = Duration::from_millis(cfg.readout_interval_milliseconds as u64);
 
@@ -93,6 +93,10 @@ impl GPIO {
 }
 
 impl HardwareDevice for GPIO {
+    fn alias(&self) -> String {
+        self.core.alias()
+    }
+
     fn update(&self) -> Result<()> {
         Ok(())
     }
@@ -101,13 +105,8 @@ impl HardwareDevice for GPIO {
         &self,
         port: u8,
         _scaling: Option<ValueScaling>,
-    ) -> Result<Box<dyn VirtualDevice + Send>> {
+    ) -> Result<(Box<dyn VirtualDevice>, EventStream)> {
         ensure!(port < 1, "GPIO has one port: the value (0)");
         self.core.get_virtual_device(port, _scaling)
-    }
-
-    fn get_event_stream(&self, port: u8) -> Result<EventStream> {
-        ensure!(port < 1, "GPIO has one port: the value (0)");
-        self.core.get_event_stream(port)
     }
 }

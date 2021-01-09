@@ -106,11 +106,11 @@ impl Client {
                 let events_matched = &*prom::EVENTS_MATCHED;
                 let events_dropped = &*prom::EVENTS_DROPPED;
 
-                'outer: loop {
+                loop {
                     // TODO introduce a per-client shutdown broadcast, triggered by whatever, and
                     // select here
                     let val = event_stream.recv().await;
-                    let events = match val {
+                    let event = match val {
                         Err(e) => match e {
                             broadcast::error::RecvError::Closed => {
                                 break;
@@ -140,24 +140,22 @@ impl Client {
                         filters.clone().unwrap()
                     };
 
-                    for event in events {
-                        if !filters.matches(&event.event) {
-                            continue;
-                        }
-                        debug!(
-                            "event_filter {}/{}: filter {:?} matched for event {:?}",
-                            remote, address, filters, event
-                        );
-
-                        let res = event_sink.send(event).await;
-                        if let Err(_) = res {
-                            debug!("event_filter {}/{}: unable to send", remote, address);
-                            break 'outer;
-                        }
-
-                        // only count this if we actually sent it out
-                        events_matched.inc();
+                    if !filters.matches(&event.event) {
+                        continue;
                     }
+                    debug!(
+                        "event_filter {}/{}: filter {:?} matched for event {:?}",
+                        remote, address, filters, event
+                    );
+
+                    let res = event_sink.send(event).await;
+                    if let Err(_) = res {
+                        debug!("event_filter {}/{}: unable to send", remote, address);
+                        break;
+                    }
+
+                    // only count this if we actually sent it out
+                    events_matched.inc();
                 }
 
                 debug!("event_filter {}/{}: shutting down", remote, address);

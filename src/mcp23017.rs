@@ -1,14 +1,11 @@
-use crate::device::{HardwareDevice, VirtualDevice};
+use crate::device::{EventStream, HardwareDevice, VirtualDevice};
 use crate::device_core::{DeviceRWCore, SynchronizedDeviceRWCore};
 use crate::{prom, Result};
 use alloy::config::ValueScaling;
-use alloy::event::Event;
 use alloy::Value;
 use embedded_hal as hal;
-use futures::Stream;
 use mcp23017 as mcpdev;
 use serde::{Deserialize, Serialize};
-use std::pin::Pin;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::Instant;
@@ -49,6 +46,7 @@ impl MCP23017 {
             .map_err(|e| failure::err_msg(format!("{:?}", e)))?;
 
         let inner = Arc::new(Mutex::new(DeviceRWCore::new_dirty(
+            alias.clone(),
             16,
             ValueScaling::default(),
         )));
@@ -178,6 +176,10 @@ impl MCP23017 {
 }
 
 impl HardwareDevice for MCP23017 {
+    fn alias(&self) -> String {
+        self.core.alias()
+    }
+
     fn update(&self) -> Result<()> {
         let mut core = self.core.lock().unwrap();
 
@@ -195,13 +197,8 @@ impl HardwareDevice for MCP23017 {
         &self,
         port: u8,
         _scaling: Option<ValueScaling>,
-    ) -> Result<Box<dyn VirtualDevice + Send>> {
+    ) -> Result<(Box<dyn VirtualDevice>, EventStream)> {
         ensure!(port < 16, "MCP23017 has 16 ports only");
         self.core.get_virtual_device(port, _scaling)
-    }
-
-    fn get_event_stream(&self, port: u8) -> Result<Pin<Box<dyn Stream<Item = Vec<Event>> + Send>>> {
-        ensure!(port < 16, "MCP23017 has 16 ports only");
-        self.core.get_event_stream(port)
     }
 }

@@ -41,7 +41,7 @@ impl DHT22 {
             .context(format!("unable to get pin {} - maybe busy?", cfg.bcm_pin))?
             .into_io(Mode::Output);
 
-        let core = Arc::new(Mutex::new(DeviceReadCore::new(2)));
+        let core = Arc::new(Mutex::new(DeviceReadCore::new(alias.clone(), 2)));
         let thread_core = core.clone();
         let adjust_priority = cfg.adjust_priority;
         let use_experimental_implementation = cfg.use_experimental_implementation;
@@ -143,6 +143,10 @@ impl DHT22 {
 }
 
 impl HardwareDevice for DHT22 {
+    fn alias(&self) -> String {
+        self.core.alias()
+    }
+
     fn update(&self) -> Result<()> {
         Ok(())
     }
@@ -151,13 +155,8 @@ impl HardwareDevice for DHT22 {
         &self,
         port: u8,
         _scaling: Option<ValueScaling>,
-    ) -> Result<Box<dyn VirtualDevice + Send>> {
+    ) -> Result<(Box<dyn VirtualDevice>, EventStream)> {
         ensure!(port < 2, "DHT22 has two ports: 0=>temperature, 1=>humidity");
         self.core.get_virtual_device(port, _scaling)
-    }
-
-    fn get_event_stream(&self, port: u8) -> Result<EventStream> {
-        ensure!(port < 2, "DHT22 has two ports: 0=>temperature, 1=>humidity");
-        self.core.get_event_stream(port)
     }
 }

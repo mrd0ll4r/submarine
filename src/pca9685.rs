@@ -125,6 +125,7 @@ impl PCA9685 {
         let dev = set_up_device(dev, config)?;
 
         let inner = Arc::new(Mutex::new(DeviceRWCore::new_dirty(
+            alias.clone(),
             16,
             ValueScaling::Logarithmic,
         )));
@@ -167,8 +168,6 @@ impl PCA9685 {
             // Do the actual update
             let res =
                 Self::handle_update_async_inner_outer(&values, scalings, dirty, &mut dev, &hist);
-
-            // TODO if nothing has changed for some time, set to sleep
 
             sleep_duration =
                 poll::poll_loop_end(module_path!(), res, &core, values, wake_up, update_interval);
@@ -338,6 +337,9 @@ impl PCA9685 {
 }
 
 impl HardwareDevice for PCA9685 {
+    fn alias(&self) -> String {
+        self.core.alias()
+    }
     fn update(&self) -> Result<()> {
         self.core.update()
     }
@@ -346,13 +348,8 @@ impl HardwareDevice for PCA9685 {
         &self,
         port: u8,
         scaling: Option<ValueScaling>,
-    ) -> Result<Box<dyn VirtualDevice + Send>> {
+    ) -> Result<(Box<dyn VirtualDevice>, EventStream)> {
         ensure!(port < 16, "PCA9685 has 16 ports only");
         self.core.get_virtual_device(port, scaling)
-    }
-
-    fn get_event_stream(&self, port: u8) -> Result<EventStream> {
-        ensure!(port < 16, "PCA9685 has 16 ports only");
-        self.core.get_event_stream(port)
     }
 }

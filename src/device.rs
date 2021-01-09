@@ -13,54 +13,40 @@ use failure::{format_err, ResultExt};
 use futures::Stream;
 use itertools::Itertools;
 use linux_embedded_hal as linux_hal;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 /// Encapsulates all functionality a hardware device must provide.
-pub(crate) trait HardwareDevice {
+pub(crate) trait HardwareDevice: Send {
+    /// Returns the alias this device was configured with
+    fn alias(&self) -> String;
+
     /// Triggers an asynchronous update and retrieves any error from previous update(s).
     ///
     /// If the hardware device does not implement asynchronous updates that need to be triggered
     /// (i.e. the device updates constantly), then this will only check for errors.
     fn update(&self) -> Result<()>;
 
-    /// Gets a VirtualDevice for the given port.
+    /// Gets a VirtualDevice and event source for the given port.
     ///
-    /// Note that it is usually possible to derive multiple virtual devices from the same port,
-    /// but the current implementation of events forbids this. See `get_event_stream` for more info.
-    ///
-    /// Both `get_virtual_device` and `get_event_stream` are generally implemented using device
-    /// cores.
+    /// Note that it is generally impossible to map the same port twice.
     fn get_virtual_device(
         &self,
         port: u8,
         scaling: Option<ValueScaling>,
-    ) -> Result<Box<dyn VirtualDevice + Send>>;
-
-    /// Gets an EventStream for the given port.
-    ///
-    /// Note that it is usually _not_ possible to get multiple event streams for the same port.
-    /// In the current mapping of virtual devices to the address space, for each mapped virtual
-    /// device, an event stream is created at the same address.
-    /// This means that, even though multiple virtual device mapped to the same port of one hardware
-    /// device could exist, this cannot happen in practice because only one of them can have an
-    /// event stream, and as such mapping in general will fail.
-    ///
-    /// Both `get_virtual_device` and `get_event_stream` are generally implemented using device
-    /// cores.
-    fn get_event_stream(&self, port: u8) -> Result<EventStream>;
+    ) -> Result<(Box<dyn VirtualDevice>, EventStream)>;
 }
 
-/// An event stream is an asynchronous Stream of groups of events.
+/// An event stream is an asynchronous Stream of events.
 ///
 /// The asynchronous nature does not usually matter, as this is all handled by some magic in tokio.
 /// For all intents and purposes, this behaves like an iterator of vectors of events.
-pub(crate) type EventStream = Pin<Box<dyn Stream<Item = Vec<Event>> + Send>>;
+pub(crate) type EventStream = Pin<Box<dyn Stream<Item = Event> + Send>>;
 
 /// A virtual device is what is exposed by the API to the outside world and mapped to a hardware
 /// device.
-pub(crate) trait VirtualDevice {
+pub(crate) trait VirtualDevice: Send {
     /// Sets the _buffered_ value of this virtual device.
     ///
     /// The value will only be written to the hardware once the `HardwareDevice` updates.
@@ -74,11 +60,19 @@ pub(crate) trait VirtualDevice {
     fn get(&self) -> Result<Value>;
 }
 
+/// An error during an update operation on a hardware device.
+pub(crate) struct TimestampedUpdateError {
+    alias: String,
+    timestamp: chrono::DateTime<chrono::Utc>,
+    error: failure::Error,
+}
+
 pub(crate) struct DeviceState {
-    hardware_devices: Vec<Box<dyn HardwareDevice + Send>>,
-    virtual_devices: HashMap<Address, Box<dyn VirtualDevice + Send>>,
+    hardware_devices: Vec<Box<dyn HardwareDevice>>,
+    virtual_devices: HashMap<Address, Box<dyn VirtualDevice>>,
     virtual_device_aliases: HashMap<String, Address>,
     virtual_device_groups: HashMap<String, Vec<Address>>,
+    pub(crate) hardware_device_update_errors: VecDeque<TimestampedUpdateError>,
 
     /// The checked, normalized configs used to create and map virtual devices.
     ///
@@ -88,27 +82,33 @@ pub(crate) struct DeviceState {
 }
 
 impl DeviceState {
-    pub(crate) fn update(&self) -> Result<()> {
+    pub(crate) fn update(&mut self) -> Result<()> {
         // We want to make sure that we call update on all hardware devices, even if some of them
         // fail to update.
-        let mut errs: Vec<Box<dyn failure::Fail>> = Vec::new();
+        let mut errs: Vec<(String, failure::Error)> = Vec::new();
         for device in &self.hardware_devices {
-            match device.update().context("unable to update device") {
+            match device.update() {
                 Ok(()) => {}
-                Err(f) => errs.push(Box::new(f)),
+                Err(f) => errs.push((device.alias(), f)),
             };
         }
 
-        if errs.is_empty() {
-            return Ok(());
+        if !errs.is_empty() {
+            let ts = chrono::Utc::now();
+
+            for (alias, err) in errs.iter() {
+                error!("unable to update hardware device {}: {:?}", alias, err)
+            }
+
+            self.hardware_device_update_errors
+                .extend(errs.into_iter().map(|e| TimestampedUpdateError {
+                    alias: e.0,
+                    timestamp: ts.clone(),
+                    error: e.1,
+                }))
         }
 
-        let s = errs
-            .into_iter()
-            .map(|err| format!("{:?}", err))
-            .join("\n===========\n");
-
-        Err(format_err!("updating one or more devices failed: {}", s))
+        return Ok(());
     }
 
     pub(crate) fn set_group(&mut self, group: &str, value: Value) -> Result<()> {
@@ -180,8 +180,8 @@ impl DeviceState {
 /// The third element are alias->Address mappings.
 /// The last element are group->Vec<Address> mappings.
 type VirtualDeviceMapping = (
-    Vec<(Address, EventStream)>,
-    HashMap<Address, Box<dyn VirtualDevice + Send>>,
+    Vec<(Address, Pin<Box<dyn Stream<Item = Event> + Send>>)>,
+    HashMap<Address, Box<dyn VirtualDevice>>,
     HashMap<String, Address>,
     HashMap<String, Vec<Address>>,
 );
@@ -224,6 +224,7 @@ impl DeviceState {
                 virtual_device_aliases,
                 virtual_device_groups,
                 virtual_device_configs,
+                hardware_device_update_errors: Default::default(),
             },
             event_streams,
         ))
@@ -231,8 +232,8 @@ impl DeviceState {
 
     fn create_hardware_devices(
         cfg: &AggregatedConfig,
-    ) -> Result<HashMap<String, Box<dyn HardwareDevice + Send>>> {
-        let mut hardware_devices: HashMap<String, Box<dyn HardwareDevice + Send>> = HashMap::new();
+    ) -> Result<HashMap<String, Box<dyn HardwareDevice>>> {
+        let mut hardware_devices: HashMap<String, Box<dyn HardwareDevice>> = HashMap::new();
         let mut synchronized_pca9685s: HashMap<
             String,
             Vec<(SynchronizedDeviceRWCore, PCA9685Config, String)>,
@@ -272,6 +273,7 @@ impl DeviceState {
                     debug!("normalized I2C bus to {}", i2c_bus);
 
                     let core = Arc::new(Mutex::new(DeviceRWCore::new_dirty(
+                        alias.clone(),
                         16,
                         ValueScaling::Logarithmic,
                     )));
@@ -421,10 +423,10 @@ impl DeviceState {
 
     fn map_virtual_devices(
         configs: &mut Vec<VirtualDeviceConfig>,
-        hardware_devices: &HashMap<String, Box<dyn HardwareDevice + Send>>,
+        hardware_devices: &HashMap<String, Box<dyn HardwareDevice>>,
     ) -> Result<VirtualDeviceMapping> {
         let mut event_streams = Vec::new();
-        let mut virtual_devices: HashMap<Address, Box<dyn VirtualDevice + Send>> = HashMap::new();
+        let mut virtual_devices: HashMap<Address, Box<dyn VirtualDevice>> = HashMap::new();
         let mut virtual_device_aliases: HashMap<String, Address> = HashMap::new();
         let mut virtual_device_groups: HashMap<String, Vec<Address>> = HashMap::new();
 
@@ -471,16 +473,12 @@ impl DeviceState {
                     cfg.alias
                 )
             })?;
-            let vdev = hw_dev
+            let (vdev, stream) = hw_dev
                 .get_virtual_device(cfg.mapping.port, cfg.mapping.scaling.clone())
                 .context(format!(
                     "unable to create virtual device at mapping {}:{}",
                     cfg.mapping.device, cfg.mapping.port
                 ))?;
-            let stream = hw_dev.get_event_stream(cfg.mapping.port).context(format!(
-                "unable to create event stream at mapping {}:{}",
-                cfg.mapping.device, cfg.mapping.port
-            ))?;
 
             virtual_devices.insert(cfg.address, vdev);
             virtual_device_aliases.insert(cfg.alias.clone(), cfg.address);

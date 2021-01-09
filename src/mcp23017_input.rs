@@ -1,4 +1,4 @@
-use crate::device::{HardwareDevice, VirtualDevice};
+use crate::device::{EventStream, HardwareDevice, VirtualDevice};
 use crate::device_core::{DeviceReadCore, SynchronizedDeviceReadCore};
 use crate::mcp23017::{MCP23017Config, MCP23017};
 use crate::prom;
@@ -8,10 +8,8 @@ use alloy::event::{ButtonEvent, Event, EventKind};
 use alloy::{HIGH, LOW};
 use embedded_hal as hal;
 use failure::*;
-use futures::Stream;
 use mcp23017 as mcpdev;
 use serde::{Deserialize, Serialize};
-use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -59,7 +57,7 @@ impl MCP23017Input {
         mcp.all_pin_mode(mcpdev::PinMode::INPUT)
             .map_err(|e| failure::err_msg(format!("{:?}", e)))?;
 
-        let inner = Arc::new(Mutex::new(DeviceReadCore::new(16)));
+        let inner = Arc::new(Mutex::new(DeviceReadCore::new(alias.clone(), 16)));
         let down = [
             Instant::now(),
             Instant::now(),
@@ -199,7 +197,7 @@ impl MCP23017Input {
             if *new_val && !previous_val {
                 // Down
                 if let Some(events) = &mut state.events[i] {
-                    events.push(Event {
+                    events.push_back(Event {
                         timestamp: real_ts,
                         inner: EventKind::Button(ButtonEvent::Down),
                     });
@@ -209,11 +207,11 @@ impl MCP23017Input {
             } else if !*new_val && previous_val {
                 // Up
                 if let Some(events) = &mut state.events[i] {
-                    events.push(Event {
+                    events.push_back(Event {
                         timestamp: real_ts,
                         inner: EventKind::Button(ButtonEvent::Up),
                     });
-                    events.push(Event {
+                    events.push_back(Event {
                         timestamp: real_ts,
                         inner: EventKind::Button(ButtonEvent::Clicked { duration: down_for }),
                     });
@@ -225,7 +223,7 @@ impl MCP23017Input {
                 if down_for.as_secs() > down_secs[i] {
                     down_secs[i] = down_for.as_secs();
                     if let Some(events) = &mut state.events[i] {
-                        events.push(Event {
+                        events.push_back(Event {
                             timestamp: real_ts,
                             inner: EventKind::Button(ButtonEvent::LongPress {
                                 seconds: down_secs[i],
@@ -243,6 +241,10 @@ impl MCP23017Input {
 }
 
 impl HardwareDevice for MCP23017Input {
+    fn alias(&self) -> String {
+        self.inner.alias()
+    }
+
     fn update(&self) -> Result<()> {
         // TODO ?
         Ok(())
@@ -252,13 +254,8 @@ impl HardwareDevice for MCP23017Input {
         &self,
         port: u8,
         _scaling: Option<ValueScaling>,
-    ) -> Result<Box<dyn VirtualDevice + Send>> {
+    ) -> Result<(Box<dyn VirtualDevice>, EventStream)> {
         ensure!(port < 16, "MCP23017 has 16 ports only");
         self.inner.get_virtual_device(port, _scaling)
-    }
-
-    fn get_event_stream(&self, port: u8) -> Result<Pin<Box<dyn Stream<Item = Vec<Event>> + Send>>> {
-        ensure!(port < 16, "MCP23017 has 16 ports only");
-        self.inner.get_event_stream(port)
     }
 }

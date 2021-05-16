@@ -30,9 +30,8 @@ mod mcp23017_input;
 mod device_core;
 mod dht22;
 mod dht22_lib;
-mod gpio;
-//mod http;
 mod ds18;
+mod gpio;
 mod pca9685;
 mod pca9685_sync;
 mod poll;
@@ -128,23 +127,10 @@ async fn main() -> Result<()> {
     ))
     .fuse();
 
-    /*
-        info!("starting HTTP server...");
-        let app = http::new(state);
-        let mut http_server =
-            task::spawn(app.listen(cfg.program.http_server_listen_address.clone())).fuse();
-    */
-
     info!(
         "TCP server is listening on tcp://{}",
         cfg.program.tcp_server_listen_address
     );
-    /*
-    info!(
-        "HTTP server is listening on http://{}",
-        cfg.program.http_server_listen_address
-    );
-     */
 
     loop {
         futures::select! {

@@ -4,7 +4,6 @@ use flexi_logger::{
 };
 use futures::future::BoxFuture;
 use log::Record;
-use tide::{Middleware, Next, Request, Response};
 
 pub(crate) fn log_format(
     w: &mut dyn std::io::Write,
@@ -42,41 +41,3 @@ pub(crate) fn set_up_logging(log_to_file: bool) -> Result<ReconfigurationHandle>
 
     Ok(handle)
 }
-
-/*
-#[derive(Debug, Clone, Default)]
-pub(crate) struct RequestLogger;
-
-impl RequestLogger {
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
-
-    async fn log_basic<'a, State: Send + Sync + 'static>(
-        &'a self,
-        ctx: Request<State>,
-        next: Next<'a, State>,
-    ) -> Response {
-        let path = ctx.url().path();
-        let method = ctx.method().as_ref();
-        trace!(target:"server","IN => {} {}", method, path);
-        let start = std::time::Instant::now();
-        let res = next.run(ctx).await;
-        let status = res.status();
-        info!(target:"server",
-              "{} {} {} {}µs",
-              method,
-              path,
-              status.as_str(),
-              start.elapsed().as_micros()
-        );
-        res
-    }
-}
-
-impl<State: Send + Sync + 'static> Middleware<State> for RequestLogger {
-    fn handle<'a>(&'a self, ctx: Request<State>, next: Next<'a, State>) -> BoxFuture<'a, Response> {
-        Box::pin(async move { self.log_basic(ctx, next).await })
-    }
-}
-*/

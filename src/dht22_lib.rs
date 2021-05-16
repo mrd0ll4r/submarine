@@ -1,14 +1,23 @@
 //! This is a Rust API to obtain temperature and humidity measurements from a DHT22 connected to
 //! a Raspberry Pi.
 //!
-//! This library is essentially a port of the
+//! This module contains two implementations:
+//! The first one is basically a copy of the [dht22_pi](https://crates.io/crates/dht22_pi) crate,
+//! licensed MIT, with slight modifications for logging and re-using the GPIO pin.
+//!
+//! The other one is essentially a port of the
 //! [Adafruit_Python_DHT](https://github.com/adafruit/Adafruit_Python_DHT) library from C to Rust.
+//! In addition, multiple "official" specs and some experimentation were used in the making of this
+//! implementation.
+//! It uses timestamps instead of a counter to measure pulse lengths.
+//! This means that it works on a CPU without a fixed frequency and, to a lesser degree, with a
+//! scheduler.
+//! Both implementations still set their thread priority to maximum in order not to get scheduled
+//! out.
 //!
-//! This library has been tesed on a DHT22 from Adafruit using a Raspberry Pi Module B+.
-//!
-//! This is a copy of the [dht22_pi](https://crates.io/crates/dht22_pi) crate, licensed MIT, with
-//! slight modifications for logging and re-using the GPIO pin.
-//!
+//! This library has been tested on various DHT22s using a Raspberry Pi 4 Module B+ on both ARMv7
+//! and AARCH64.
+
 use std::ptr::read_volatile;
 use std::ptr::write_volatile;
 
@@ -148,6 +157,8 @@ fn decode(arr: [usize; DHT_PULSES * 2]) -> Result<Reading, ReadingError> {
 /// attempt a reading more frequently than once every 2 seconds because the DHT22 hardware does
 /// not support that.
 ///
+/// Implementation taken from
+/// [michaelfletchercgy/dht22_pi](https://github.com/michaelfletchercgy/dht22_pi).
 pub fn read_pin(pin: &mut IoPin, set_prio: bool) -> Result<Reading, ReadingError> {
     let mut pulse_counts: [usize; DHT_PULSES * 2] = [0; DHT_PULSES * 2];
     pin.set_mode(Mode::Output);
@@ -171,6 +182,7 @@ pub fn read_pin(pin: &mut IoPin, set_prio: bool) -> Result<Reading, ReadingError
     decode(pulse_counts)
 }
 
+/// Alternative, timestamp-based implementation with various optimizations.
 pub fn read_pin_2(pin: &mut IoPin, set_prio: bool) -> Result<Reading, ReadingError> {
     if set_prio {
         set_max_priority();
@@ -281,6 +293,15 @@ fn read_pin_inner_2(pin: &mut IoPin) -> Result<Vec<u16>, ReadingError> {
     // No clue if we need this either, as the signal line is pulled up already in hardware..
     //pin.set_pullupdown(PullUpDown::PullUp);
     pin.set_pullupdown(PullUpDown::Off);
+
+    // Somewhat dirty fix for long cables, as determined through experimentation:
+    // It looks like it takes the signal line too long to rise after we switch it to an input.
+    // This manifests as a very short transition at the beginning (because we assume the signal
+    // line should be `High` but it's not yet).
+    // So to combat that we just wait until it has risen.
+    while pin.read() != Level::High {
+        tiny_sleep();
+    }
 
     // Now loop on the input and time the transitions.
     let mut i = 0_u64;

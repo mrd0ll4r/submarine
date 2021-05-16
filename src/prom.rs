@@ -18,6 +18,12 @@ lazy_static! {
         &["alias", "result"]
     )
     .unwrap();
+    pub static ref DS18_MEASUREMENTS: IntCounterVec = register_int_counter_vec!(
+        "ds18_measurements",
+        "counts measurements for DS18 sensors by alias and result",
+        &["alias", "result"]
+    )
+    .unwrap();
     pub static ref PCA9685_WRITE_DURATION: HistogramVec = register_histogram_vec!(
         "pca9685_write_duration",
         "duration of writing to a PCA9685 in microseconds by alias",
@@ -108,10 +114,10 @@ fn track_system_stats() {
         }
 
         match sys.load_average() {
-            Ok(loadavg) => {
-                load_avg_one.set(loadavg.one as f64);
-                load_avg_five.set(loadavg.five as f64);
-                load_avg_fifteen.set(loadavg.fifteen as f64)
+            Ok(load_avg) => {
+                load_avg_one.set(load_avg.one as f64);
+                load_avg_five.set(load_avg.five as f64);
+                load_avg_fifteen.set(load_avg.fifteen as f64)
             }
             Err(x) => warn!("unable to get load average: {}", x),
         }

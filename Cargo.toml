@@ -31,7 +31,7 @@ chrono = "0.4"
 # Hardware
 embedded-hal = "0.2"
 linux-embedded-hal = "0.3"
-rppal = "0.11"
+rppal = "0.12"
 pwm-pca9685 = "0.3"
 mcp23017 = {git ="https://github.com/mrd0ll4r/mcp23017"}
 libc = "0.2"

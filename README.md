@@ -13,7 +13,7 @@ of *groups*.
 Virtual devices are derived from/mapped to *hardware devices* on numerical *ports*, which start at `0` by convention.
 Virtual devices also generate *events*, which are also mapped from hardware devices.
 
-Hardware devices are interact with the actual hardware attached to the RPi.
+Hardware devices interact with the actual hardware attached to the RPi.
 Hardware devices run asynchronously to the rest of the program and independently of each other.
 They use a number of different strategies to interface with the hardware, which are abstracted away.
 
@@ -186,21 +186,29 @@ The [alloy](../alloy) crate contains all types relevant to the API and an implem
 You need a working installation of Rust, see [rustup.rs](https://rustup.rs/).
 We use the most recent stable version, which you should have installed by default.
 
-This project is configure to compile for Linux on ARMv7 (32 bit) by default, no matter from where you're compiling.
+This project is configure to compile for Linux on ARMv8 (64 bit) by default, no matter from where you're compiling.
 First of all, add the appropriate target to your Rust installation:
 ```
-rustup target add armv7-unknown-linux-gnueabihf 
+rustup target add aarch64-unknown-linux-gnu
+# if you also want ARMv7
+#rustup target add armv7-unknown-linux-gnueabihf
 ```
 Then tell cargo how to link for that target, in `~/.cargo/config`:
 ```
-[target.armv7-unknown-linux-gnueabihf]
-linker = "arm-linux-gnueabihf-gcc"
+[target.aarch64-unknown-linux-gnu]
+linker = "aarch64-linux-gnu-gcc"
+
+# if you also want ARMv7
+#[target.armv7-unknown-linux-gnueabihf]
+#linker = "arm-linux-gnueabihf-gcc"
 ```
 
 Now you actually need to get the linker.
 On Linux you just need to get the appropriate package (Debian):
 ```
-sudo apt install gcc-arm-linux-gnueabihf
+sudo apt install gcc-aarch64-linux-gnu
+# if you want to build for ARMv7
+#sudo apt install gcc-arm-linux-gnueabihf
 ```
 On Windows you can get pre-built binaries for this from [here](https://gnutoolchains.com/raspberry/) (8.3.0 worked for me).
 Additionally, before building on Windows, invoke `env.bat`, which will set `AR` to the appropriate value.
@@ -213,6 +221,13 @@ The default target is already set to Linux ARMv7 (see `.cargo/config`), so `carg
 Submarine is a single statically-linked binary which runs on the Raspberry Pi (and should be kept running).
 It uses the usual Rust logging facilities, which can be controlled via the `RUST_LOG` environment variable.
 A good general setting for this might be `RUST_LOG="info"`.
+
+To use the new DHT22 implementation, SYS_CAP_NICE capabilities are needed.
+These can be given to a binary like so:
+```
+sudo setcap 'cap_sys_nice=eip' submarine
+```
+Unfortunately, this is cleared whenever the binary is replaced.
 
 It has been observed that a current stable Raspbian shows somewhat high variance in network latencies.
 For this reason it is recommended to run [Kaleidoscope](../kaleidoscope), the lighting execution engine, on the same

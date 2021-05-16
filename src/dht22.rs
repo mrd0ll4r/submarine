@@ -4,9 +4,10 @@ use crate::dht22_lib::ReadingError;
 use crate::{dht22_lib, prom, Result};
 use alloy::config::ValueScaling;
 use failure::ResultExt;
+use prometheus::core::{AtomicF64, AtomicI64, GenericCounter, GenericGauge};
 use rand::Rng;
 use rppal::gpio;
-use rppal::gpio::{Gpio, Mode};
+use rppal::gpio::{Gpio, IoPin, Mode};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -89,53 +90,83 @@ impl DHT22 {
         thread::sleep(Duration::from_millis(millis));
 
         loop {
+            // Read sensor
+            DHT22::do_read_sensor(
+                &core,
+                &mut pin,
+                adjust_priority,
+                use_experimental_implementation,
+                &temp_gauge,
+                &humidity_gauge,
+                &ok_counter,
+                &checksum_error_counter,
+                &timeout_error_counter,
+                &gpio_error_counter,
+                &suspicous_value_counter,
+            );
+
+            // Sleep aftewards, so we get a fresh reading when the program starts.
             thread::sleep(readout_interval);
+        }
+    }
 
-            let readings = if use_experimental_implementation {
-                dht22_lib::read_pin_2(&mut pin, adjust_priority)
-            } else {
-                dht22_lib::read_pin(&mut pin, adjust_priority)
-            };
-            // Take this timestamp after the reading, because that takes a few milliseconds.
-            let ts = chrono::Utc::now();
+    fn do_read_sensor(
+        core: &SynchronizedDeviceReadCore,
+        mut pin: &mut IoPin,
+        adjust_priority: bool,
+        use_experimental_implementation: bool,
+        temp_gauge: &GenericGauge<AtomicF64>,
+        humidity_gauge: &GenericGauge<AtomicF64>,
+        ok_counter: &GenericCounter<AtomicI64>,
+        checksum_error_counter: &GenericCounter<AtomicI64>,
+        timeout_error_counter: &GenericCounter<AtomicI64>,
+        gpio_error_counter: &GenericCounter<AtomicI64>,
+        suspicous_value_counter: &GenericCounter<AtomicI64>,
+    ) {
+        let readings = if use_experimental_implementation {
+            dht22_lib::read_pin_2(&mut pin, adjust_priority)
+        } else {
+            dht22_lib::read_pin(&mut pin, adjust_priority)
+        };
+        // Take this timestamp after the reading, because that takes a few milliseconds.
+        let ts = chrono::Utc::now();
 
-            match readings {
-                Ok(readings) => {
-                    debug!("got readings from pin {}: {:?}", pin.pin(), readings);
+        match readings {
+            Ok(readings) => {
+                debug!("got readings from pin {}: {:?}", pin.pin(), readings);
 
-                    // We occasionally get these readings with correct checksums, so we might as
-                    // well guard against them...
-                    if readings.humidity > 100_f32 {
-                        warn!(
-                            "got suspicious reading from pin {}: {:?}",
-                            pin.pin(),
-                            readings
-                        );
-                        suspicous_value_counter.inc();
-                        continue;
-                    }
-
-                    let temp = alloy::map_to_value((-40_f64, 80_f64), readings.temperature as f64);
-                    let humidity = alloy::map_to_value((0_f64, 100_f64), readings.humidity as f64);
-
-                    {
-                        let mut core = core.lock().unwrap();
-
-                        core.update_value_and_generate_events(ts, 0, temp);
-                        core.update_value_and_generate_events(ts, 1, humidity);
-                    }
-
-                    temp_gauge.set(readings.temperature as f64);
-                    humidity_gauge.set(readings.humidity as f64);
-                    ok_counter.inc();
+                // We occasionally get these readings with correct checksums, so we might as
+                // well guard against them...
+                if readings.humidity > 100_f32 {
+                    warn!(
+                        "got suspicious reading from pin {}: {:?}",
+                        pin.pin(),
+                        readings
+                    );
+                    suspicous_value_counter.inc();
+                    return;
                 }
-                Err(err) => {
-                    warn!("unable to read from pin {}: {:?}", pin.pin(), err);
-                    match err {
-                        ReadingError::Checksum => checksum_error_counter.inc(),
-                        ReadingError::Timeout => timeout_error_counter.inc(),
-                        ReadingError::Gpio(_) => gpio_error_counter.inc(),
-                    }
+
+                let temp = alloy::map_temperature_to_value(readings.temperature as f64);
+                let humidity = alloy::map_relative_humidity_to_value(readings.humidity as f64);
+
+                {
+                    let mut core = core.lock().unwrap();
+
+                    core.update_value_and_generate_events(ts, 0, temp);
+                    core.update_value_and_generate_events(ts, 1, humidity);
+                }
+
+                temp_gauge.set(readings.temperature as f64);
+                humidity_gauge.set(readings.humidity as f64);
+                ok_counter.inc();
+            }
+            Err(err) => {
+                warn!("unable to read from pin {}: {:?}", pin.pin(), err);
+                match err {
+                    ReadingError::Checksum => checksum_error_counter.inc(),
+                    ReadingError::Timeout => timeout_error_counter.inc(),
+                    ReadingError::Gpio(_) => gpio_error_counter.inc(),
                 }
             }
         }

@@ -32,6 +32,7 @@ mod dht22;
 mod dht22_lib;
 mod gpio;
 //mod http;
+mod ds18;
 mod pca9685;
 mod pca9685_sync;
 mod poll;

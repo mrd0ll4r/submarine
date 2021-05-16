@@ -1,6 +1,7 @@
 use crate::config::{AggregatedConfig, DeviceConfig};
 use crate::device_core::{DeviceRWCore, SynchronizedDeviceRWCore};
 use crate::dht22::DHT22;
+use crate::ds18::DS18;
 use crate::gpio::GPIO;
 use crate::pca9685::PCA9685Config;
 use crate::pca9685_sync::PCA9685Synchronized;
@@ -284,6 +285,18 @@ impl DeviceState {
                     ));
 
                     hardware_devices.insert(alias.clone(), Box::new(core));
+                }
+                DeviceConfig::DS18 { alias, config: cfg } => {
+                    debug!("creating DS18 {}...", alias);
+                    let alias = alias.to_lowercase();
+                    debug!("normalized alias to {}", alias);
+                    ensure!(
+                        !hardware_devices.contains_key(&alias),
+                        "duplicate alias: {}",
+                        alias
+                    );
+                    let dev = DS18::new(alias.clone(), cfg)?;
+                    hardware_devices.insert(alias.clone(), Box::new(dev));
                 }
                 DeviceConfig::MCP23017 { alias, config: cfg } => {
                     debug!("creating MCP23017 {}...", alias);

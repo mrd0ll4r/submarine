@@ -1,0 +1,51 @@
+config:
+  devices:
+    - type: ds18
+      alias: ds18b20-1
+      config:
+        id: "28-000005ab55aa"
+        readout_interval_seconds: 2
+    - type: ds18
+      alias: ds18b20-2
+      config:
+        id: "28-000005abc4ca"
+        readout_interval_seconds: 2
+    - type: ds18
+      alias: ds18b20-decke
+      config:
+        id: "28-021319d40daa"
+        readout_interval_seconds: 2
+    - type: ds18
+      alias: ds18s20-1
+      config:
+        id: "10-000802b569a0"
+        readout_interval_seconds: 2
+  virtual_devices:
+    - address: 200
+      alias: ds18b20-1-temp
+      groups: ["temp"]
+      mapping:
+        device: ds18b20-1
+        port: 0
+      read_only: true
+    - address: 201
+      alias: ds18b20-2-temp
+      groups: ["temp"]
+      mapping:
+        device: ds18b20-2
+        port: 0
+      read_only: true
+    - address: 202
+      alias: ds18b20-decke-temp
+      groups: ["temp"]
+      mapping:
+        device: ds18b20-decke
+        port: 0
+      read_only: true
+    - address: 203
+      alias: ds18s20-1-temp
+      groups: ["temp"]
+      mapping:
+        device: ds18s20-1
+        port: 0
+      read_only: true

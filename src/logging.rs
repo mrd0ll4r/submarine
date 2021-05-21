@@ -2,7 +2,6 @@ use crate::Result;
 use flexi_logger::{
     Cleanup, Criterion, DeferredNow, Duplicate, Logger, Naming, ReconfigurationHandle,
 };
-use futures::future::BoxFuture;
 use log::Record;
 
 pub(crate) fn log_format(

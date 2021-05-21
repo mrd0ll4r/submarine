@@ -26,7 +26,6 @@ mod i2c_mock;
 mod logging;
 mod mcp23017;
 mod mcp23017_input;
-//mod mcp23s17;
 mod bme280;
 mod device_core;
 mod dht22;

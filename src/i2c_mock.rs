@@ -31,7 +31,8 @@ impl fmt::Display for I2cMockError {
 /// ```
 pub struct I2cMock {
     /// Registers
-    pub data_values: [u8; 256],
+    data_values: [u8; 256],
+    last_address: u8,
 }
 
 impl I2cMock {
@@ -39,6 +40,7 @@ impl I2cMock {
     pub fn new() -> Self {
         I2cMock {
             data_values: [0; 256],
+            last_address: 0,
         }
     }
 }
@@ -77,6 +79,34 @@ impl hal::blocking::i2c::WriteRead for I2cMock {
             // We assume the chip supports auto-increment and wrap-around, emulate that.
             data_offset = (data_offset + 1) % self.data_values.len();
         }
+
+        self.last_address = data_offset as u8;
+
+        Ok(())
+    }
+}
+
+impl hal::blocking::i2c::Read for I2cMock {
+    type Error = I2cMockError;
+
+    /// `read` implementation.
+    ///
+    /// # Arguments
+    ///
+    /// * `_address` - The slave address. Ignored.
+    /// * `bytes` - The buffer to be read into.
+    ///
+    fn read(&mut self, _address: u8, buffer: &mut [u8]) -> Result<(), Self::Error> {
+        let mut data_offset = self.last_address as usize;
+
+        for value in buffer.iter_mut() {
+            *value = self.data_values[data_offset];
+
+            // We assume the chip supports auto-increment and wrap-around, emulate that.
+            data_offset = (data_offset + 1) % self.data_values.len();
+        }
+
+        self.last_address = data_offset as u8;
 
         Ok(())
     }
@@ -120,6 +150,8 @@ impl hal::blocking::i2c::Write for I2cMock {
             // We suppose the chip supports auto-increment and wrap-around, emulate that.
             data_offset = (data_offset + 1) % self.data_values.len();
         }
+
+        self.last_address = data_offset as u8;
 
         Ok(())
     }

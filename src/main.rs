@@ -27,6 +27,7 @@ mod logging;
 mod mcp23017;
 mod mcp23017_input;
 //mod mcp23s17;
+mod bme280;
 mod device_core;
 mod dht22;
 mod dht22_lib;

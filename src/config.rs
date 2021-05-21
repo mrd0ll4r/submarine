@@ -1,3 +1,4 @@
+use crate::bme280::BME280Config;
 use crate::dht22::DHT22Config;
 use crate::ds18::DS18Config;
 use crate::gpio::GPIOConfig;
@@ -148,6 +149,8 @@ pub(crate) enum DeviceConfig {
         alias: String,
         config: MCP23017Config,
     },
+    #[serde(rename = "bme280")]
+    BME280 { alias: String, config: BME280Config },
     #[serde(rename = "mcp23017_input")]
     MCP23017Input {
         alias: String,

@@ -338,6 +338,26 @@ impl DeviceState {
                     };
                     hardware_devices.insert(alias.clone(), Box::new(dev));
                 }
+                DeviceConfig::BME280 { alias, config: cfg } => {
+                    debug!("creating BME280 {}...", alias);
+                    let alias = alias.to_lowercase();
+                    debug!("normalized alias to {}", alias);
+                    ensure!(
+                        !hardware_devices.contains_key(&alias),
+                        "duplicate alias: {}",
+                        alias
+                    );
+                    let dev = if cfg.i2c_bus == "" {
+                        warn!("using I2C mock");
+                        let i2c = i2c_mock::I2cMock::new();
+                        crate::bme280::BME280::new(i2c, &cfg, alias.clone())?
+                    } else {
+                        debug!("using I2C at {}", cfg.i2c_bus);
+                        let i2c = linux_hal::I2cdev::new(cfg.i2c_bus.clone())?;
+                        crate::bme280::BME280::new(i2c, &cfg, alias.clone())?
+                    };
+                    hardware_devices.insert(alias.clone(), Box::new(dev));
+                }
                 DeviceConfig::DHT22 { alias, config } => {
                     debug!("creating DHT22 {}...", alias);
                     let alias = alias.to_lowercase();

@@ -12,6 +12,8 @@ lazy_static! {
         register_gauge_vec!("temperature", "temperature in celsius by alias", &["alias"]).unwrap();
     pub static ref HUMIDITY: GaugeVec =
         register_gauge_vec!("humidity", "relative humidity by alias", &["alias"]).unwrap();
+    pub static ref PRESSURE: GaugeVec =
+        register_gauge_vec!("pressure", "air pressure in pascals by alias", &["alias"]).unwrap();
     pub static ref DHT22_MEASUREMENTS: IntCounterVec = register_int_counter_vec!(
         "dht22_measurements",
         "counts measurements for DHT22 sensors by alias and result",
@@ -20,6 +22,19 @@ lazy_static! {
     .unwrap();
     pub static ref DS18_MEASUREMENTS: IntCounterVec = register_int_counter_vec!(
         "ds18_measurements",
+        "counts measurements for DS18 sensors by alias and result",
+        &["alias", "result"]
+    )
+    .unwrap();
+    pub static ref BME280_READ_DURATION: HistogramVec = register_histogram_vec!(
+        "bme280_read_duration",
+        "duration of reading from an BME280 in microseconds by alias",
+        &["alias"],
+        exponential_buckets(150_f64, (1.5_f64).sqrt(), 10).unwrap()
+    )
+    .unwrap();
+    pub static ref BME280_MEASUREMENTS: IntCounterVec = register_int_counter_vec!(
+        "bme280_measurements",
         "counts measurements for DS18 sensors by alias and result",
         &["alias", "result"]
     )

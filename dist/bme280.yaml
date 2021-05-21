@@ -1,0 +1,31 @@
+config:
+  devices:
+    - type: bme280
+      alias: bme-outside-kitchen
+      config:
+        i2c_bus: "/dev/i2c-4"
+        i2c_slave_address: 0x76
+        readout_interval_seconds: 1
+
+  virtual_devices:
+    - address: 4001
+      alias: bme-outside-kitchen-temp
+      groups: ["temp"]
+      mapping:
+        device: bme-outside-kitchen
+        port: 0
+      read_only: true
+    - address: 4002
+      alias: bme-outside-kitchen-humidity
+      groups: ["humidity"]
+      mapping:
+        device: bme-outside-kitchen
+        port: 1
+      read_only: true
+    - address: 4003
+      alias: bme-outside-kitchen-pressure
+      groups: ["pressure"]
+      mapping:
+        device: bme-outside-kitchen
+        port: 2
+      read_only: true

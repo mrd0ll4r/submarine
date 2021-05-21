@@ -23,7 +23,6 @@ serde_yaml = "0.8"
 tokio = { version = "1", features = ["full"] }
 tokio-util = {version="0.6", features=["codec"]}
 futures = "0.3"
-#bytes = "1"
 chrono = "0.4"
 
 # Hardware
@@ -33,6 +32,7 @@ rppal = "0.12"
 pwm-pca9685 = "0.3"
 mcp23017 = {git ="https://github.com/mrd0ll4r/mcp23017"}
 libc = "0.2"
+bme280 = "0.2.1"
 
 # Prometheus, metrics
 prometheus_exporter = "0.7.2"

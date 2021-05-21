@@ -130,6 +130,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bme280"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc93357f2a5603736e2c1f1ba8e18e9ec80efa7fdade5d6a37c11362b76363f4"
+dependencies = [
+ "embedded-hal",
+]
+
+[[package]]
 name = "byteorder"
 version = "1.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1137,6 +1146,7 @@ name = "submarine"
 version = "0.1.0"
 dependencies = [
  "alloy",
+ "bme280",
  "chrono",
  "embedded-hal",
  "failure",

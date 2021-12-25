@@ -1,0 +1,29 @@
+devices:
+  - type: mcp23017_input
+    alias: mcp-in-1
+    tags: ["mcp23017"]
+    config:
+      i2c_bus: "/dev/i2c-1"
+      i2c_slave_address: 33
+      polling_interval_millis: 5
+      enable_pullups: false
+      invert: false
+    inputs:
+      - port: 0
+        alias: button-kitchen-right
+        tags: ["button","kitchen"]
+      - port: 1
+        alias: button-kitchen-left
+        tags: ["button","kitchen"]
+      - port: 2
+        alias: button-glassdoor-left
+        tags: ["button","glassdoor"]
+      - port: 3
+        alias: button-glassdoor-right
+        tags: ["button","glassdoor"]
+      - port: 4
+        alias: button-front-door-right
+        tags: ["button","front-door"]
+      - port: 5
+        alias: button-front-door-left
+        tags: ["button","front-door"]

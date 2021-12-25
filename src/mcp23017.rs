@@ -1,12 +1,12 @@
-use crate::device::{EventStream, HardwareDevice, VirtualDevice};
+use crate::config::ValueScaling;
+use crate::device::{EventStream, HardwareDevice, OutputHardwareDevice, OutputPort};
 use crate::device_core::{DeviceRWCore, SynchronizedDeviceRWCore};
 use crate::{prom, Result};
-use alloy::config::ValueScaling;
-use alloy::Value;
+use alloy::OutputValue;
 use embedded_hal as hal;
 use mcp23017 as mcpdev;
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar};
 use std::thread;
 use std::time::Instant;
 
@@ -45,11 +45,11 @@ impl MCP23017 {
         mcp.all_pin_mode(mcpdev::PinMode::OUTPUT)
             .map_err(|e| failure::err_msg(format!("{:?}", e)))?;
 
-        let inner = Arc::new(Mutex::new(DeviceRWCore::new_dirty(
+        let inner = SynchronizedDeviceRWCore::new_from_core(DeviceRWCore::new_dirty(
             alias.clone(),
             16,
             ValueScaling::default(),
-        )));
+        ));
         let inner2 = inner.clone();
         let cond_var = Arc::new(Condvar::new());
         let cond_var2 = cond_var.clone();
@@ -83,7 +83,7 @@ impl MCP23017 {
         loop {
             // Get copy of the values and the device
             let values = {
-                let mut core = core.lock().unwrap();
+                let mut core = core.core.lock().unwrap();
                 while !core.dirty {
                     core = cond_var.wait(core).unwrap();
                 }
@@ -107,14 +107,14 @@ impl MCP23017 {
             // Update device values, generate events, populate error in case something went wrong.
             {
                 let ts = chrono::Utc::now();
-                let mut core = core.lock().unwrap();
-                core.finish_update(values, ts, res.err());
+                let mut core = core.core.lock().unwrap();
+                core.finish_update(res.map(|_| values), ts);
             }
         }
     }
 
     fn handle_update_async_inner<I2C, E>(
-        values: &[Value],
+        values: &[OutputValue],
         dev: &mut mcpdev::MCP23017<I2C>,
         hist: &prometheus::Histogram,
         alias: &str,
@@ -148,7 +148,7 @@ impl MCP23017 {
         Ok(())
     }
 
-    fn compute_registers(values: &[Value]) -> (u8, u8) {
+    fn compute_registers(values: &[OutputValue]) -> (u8, u8) {
         let mut reg = 0_u16;
         for (i, value) in values.iter().enumerate() {
             // non-inverted
@@ -173,32 +173,44 @@ impl MCP23017 {
             mcp23017::Error::InterruptPinError => panic!("interrupt pin not found?"),
         }
     }
+
+    pub(crate) fn compute_port_alias(port: u8) -> Result<String> {
+        ensure!(port < 16, "MCP23017 has 16 ports only");
+        let mut s = String::new();
+        if port < 8 {
+            s.push_str("a-")
+        } else {
+            s.push_str("b-")
+        }
+        s.push_str(format!("{}", port % 8).as_str());
+
+        Ok(s)
+    }
 }
 
-impl HardwareDevice for MCP23017 {
-    fn alias(&self) -> String {
-        self.core.alias()
-    }
-
+impl OutputHardwareDevice for MCP23017 {
     fn update(&self) -> Result<()> {
-        let mut core = self.core.lock().unwrap();
+        let core = self.core.core.lock().unwrap();
 
         if core.dirty {
             self.cond_var.notify_one();
         }
 
-        match core.err.take() {
-            Some(err) => Err(err),
-            None => Ok(()),
-        }
+        Ok(())
     }
 
-    fn get_virtual_device(
+    fn get_output_port(
         &self,
         port: u8,
-        _scaling: Option<ValueScaling>,
-    ) -> Result<(Box<dyn VirtualDevice>, EventStream)> {
+        scaling: Option<ValueScaling>,
+    ) -> Result<(Box<dyn OutputPort>, EventStream)> {
         ensure!(port < 16, "MCP23017 has 16 ports only");
-        self.core.get_virtual_device(port, _scaling)
+        self.core.get_output_port(port, scaling)
+    }
+}
+
+impl HardwareDevice for MCP23017 {
+    fn port_alias(&self, port: u8) -> Result<String> {
+        MCP23017::compute_port_alias(port)
     }
 }

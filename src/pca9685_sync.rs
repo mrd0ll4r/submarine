@@ -86,8 +86,8 @@ where
 
                 // Update device values, generate events, populate error in case something went wrong.
                 {
-                    let mut core = core.lock().unwrap();
-                    core.finish_update(values, ts, res.err());
+                    let mut core = core.core.lock().unwrap();
+                    core.finish_update(res.map(|_| values), ts);
                 }
             }
 

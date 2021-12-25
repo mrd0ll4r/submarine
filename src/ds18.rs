@@ -1,14 +1,13 @@
-use crate::device::{EventStream, HardwareDevice, VirtualDevice};
+use crate::device::{EventStream, HardwareDevice, InputHardwareDevice};
 use crate::device_core::{DeviceReadCore, SynchronizedDeviceReadCore};
 use crate::prom;
 use crate::Result;
-use alloy::config::ValueScaling;
+use alloy::config::{InputValue, InputValueType};
 use failure::ResultExt;
-use prometheus::core::{AtomicF64, AtomicI64, GenericCounter, GenericGauge};
+use prometheus::core::{AtomicI64, GenericCounter};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -44,7 +43,10 @@ impl DS18 {
             &alias, &cfg.id
         ))?;
 
-        let core = Arc::new(Mutex::new(DeviceReadCore::new(alias.clone(), 1)));
+        let core = SynchronizedDeviceReadCore::new_from_core(DeviceReadCore::new(
+            alias.clone(),
+            &[InputValueType::Temperature],
+        ));
         let thread_core = core.clone();
         let readout_interval = Duration::from_secs(cfg.readout_interval_seconds as u64);
         let id = cfg.id.clone();
@@ -63,7 +65,6 @@ impl DS18 {
         core: SynchronizedDeviceReadCore,
         readout_interval: Duration,
     ) {
-        let temp_gauge = prom::TEMPERATURE.with_label_values(&[alias.as_str()]);
         let ok_counter = prom::DS18_MEASUREMENTS.with_label_values(&[alias.as_str(), "ok"]);
         let error_counter = prom::DS18_MEASUREMENTS.with_label_values(&[alias.as_str(), "error"]);
         let conversion_error_counter =
@@ -81,7 +82,6 @@ impl DS18 {
                 &id,
                 &p,
                 &core,
-                &temp_gauge,
                 &ok_counter,
                 &error_counter,
                 &conversion_error_counter,
@@ -97,7 +97,6 @@ impl DS18 {
         id: &str,
         p: &PathBuf,
         core: &SynchronizedDeviceReadCore,
-        temp_gauge: &GenericGauge<AtomicF64>,
         ok_counter: &GenericCounter<AtomicI64>,
         error_counter: &GenericCounter<AtomicI64>,
         conversion_error_counter: &GenericCounter<AtomicI64>,
@@ -129,19 +128,29 @@ impl DS18 {
                                     alias, id, temp, t
                                 );
 
-                                let temp = alloy::map_temperature_to_value(t);
-
                                 {
-                                    let mut core = core.lock().unwrap();
-
-                                    core.update_value_and_generate_events(ts, 0, temp);
+                                    let mut core = core.core.lock().unwrap();
+                                    core.update_value_and_generate_events(
+                                        ts,
+                                        0,
+                                        Ok(InputValue::Temperature(t)),
+                                    );
                                 }
 
-                                temp_gauge.set(t);
                                 ok_counter.inc();
                             }
                             Err(err) => {
                                 warn!("unable to parse temperature for 1-wire device {} with ID {}: {:?}", alias, id, err);
+
+                                let msg = format!("{:?}", err);
+                                {
+                                    let mut core = core.core.lock().unwrap();
+                                    core.set_error_on_all_ports(
+                                        ts,
+                                        format!("unable to parse: {}", msg),
+                                    )
+                                }
+
                                 conversion_error_counter.inc();
                             }
                         }
@@ -151,6 +160,12 @@ impl DS18 {
                             "unable to parse string for 1-wire device {} with ID {}: {:?}",
                             alias, id, err
                         );
+
+                        let msg = format!("{:?}", err);
+                        {
+                            let mut core = core.core.lock().unwrap();
+                            core.set_error_on_all_ports(ts, format!("unable to parse: {}", msg))
+                        }
                         conversion_error_counter.inc();
                     }
                 }
@@ -160,27 +175,29 @@ impl DS18 {
                     "unable to read 1-wire device {} with ID {}: {:?}",
                     alias, id, err
                 );
+
+                let msg = format!("{:?}", err);
+                {
+                    let mut core = core.core.lock().unwrap();
+                    core.set_error_on_all_ports(ts, format!("unable to read: {}", msg))
+                }
+
                 error_counter.inc();
             }
         }
     }
 }
 
-impl HardwareDevice for DS18 {
-    fn alias(&self) -> String {
-        self.core.alias()
-    }
-
-    fn update(&self) -> Result<()> {
-        Ok(())
-    }
-
-    fn get_virtual_device(
-        &self,
-        port: u8,
-        _scaling: Option<ValueScaling>,
-    ) -> Result<(Box<dyn VirtualDevice>, EventStream)> {
+impl InputHardwareDevice for DS18 {
+    fn get_input_port(&self, port: u8) -> Result<(InputValueType, EventStream)> {
         ensure!(port < 1, "DS18 has only one port");
-        self.core.get_virtual_device(port, _scaling)
+        self.core.get_input_port(port)
+    }
+}
+
+impl HardwareDevice for DS18 {
+    fn port_alias(&self, port: u8) -> Result<String> {
+        ensure!(port < 1, "DS18 has only one port");
+        Ok("temperature".to_string())
     }
 }

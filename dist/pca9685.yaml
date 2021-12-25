@@ -1,98 +1,114 @@
-config:
-  devices:
-    - type: pca9685_synchronized
-      alias: pca9685-servo
-      config:
-        i2c_bus: ""
-        i2c_slave_address: 64
-        use_external_clock: false
-        inverted: true
-        output_driver_totem_pole: true
-        update_interval_millis: 5
-        prescale: 100
-    - type: pca9685_synchronized
-      alias: pca9685-1
-      config:
-        i2c_bus: ""
-        i2c_slave_address: 65
-        use_external_clock: false
-        inverted: true
-        output_driver_totem_pole: true
-        update_interval_millis: 5
-        prescale: 3
-    - type: pca9685_synchronized
-      alias: pca9685-2
-      config:
-        i2c_bus: ""
-        i2c_slave_address: 66
-        use_external_clock: false
-        inverted: true
-        output_driver_totem_pole: true
-        update_interval_millis: 5
-        prescale: 3
-  virtual_devices:
-    - address: 23
-      alias: strip1-y
-      groups: ["strip1","strip-y"]
-      mapping:
-        device: pca9685-1
-        port: 0
-      read_only: false
-    - address: 24
-      alias: strip1-r
-      groups: ["strip1","strip-r"]
-      mapping:
-        device: pca9685-1
-        port: 1
-      read_only: false
-    - address: 25
-      alias: strip1-g
-      groups: ["strip1","strip-g"]
-      mapping:
-        device: pca9685-1
-        port: 2
-      read_only: false
+devices:
+  - type: pca9685_synchronized
+    alias: pca9685-servo
+    config:
+      i2c_bus: "/dev/i2c-3"
+      i2c_slave_address: 64
+      use_external_clock: false
+      inverted: false
+      output_driver_totem_pole: true
+      update_interval_millis: 10
+      prescale: 100
+    outputs:
+      - port: 0
+        alias: servo-1
+        tags: ["servo"]
+        scaling:
+          linear:
+            from: 4000
+            to: 7500
+      - port: 1
+        alias: servo-2
+        tags: ["servo"]
+        scaling:
+          linear:
+            from: 6000
+            to: 3500
+      - port: 2
+        alias: servo-3
+        tags: ["servo"]
+        scaling:
+          linear:
+            from: 6500
+            to: 4300
+      - port: 3
+        alias: servo-4
+        tags: ["servo"]
+        scaling:
+          linear:
+            from: 3400
+            to: 7000
+      - port: 4
+        alias: servo-5
+        tags: ["servo"]
+        scaling:
+          linear:
+            from: 3500
+            to: 6500
+  - type: pca9685_synchronized
+    alias: pca9685-1
+    config:
+      i2c_bus: "/dev/i2c-3"
+      i2c_slave_address: 65
+      use_external_clock: false
+      inverted: false
+      output_driver_totem_pole: true
+      update_interval_millis: 10
+      prescale: 3
+    outputs:
+      - port: 0
+        alias: kitchen-out-b
+        tags: ["rgbw","blue","kitchen"]
+      - port: 1
+        alias: kitchen-out-w
+        tags: ["rgbw","white","kitchen"]
+      - port: 2
+        alias: kitchen-out-g
+        tags: ["rgbw","green","kitchen"]
+      - port: 3
+        alias: kitchen-out-r
+        tags: ["rgbw","red","kitchen"]
 
-    - address: 26
-      alias: strip2-y
-      groups: ["strip2","strip-y"]
-      mapping:
-        device: pca9685-2
-        port: 0
-      read_only: false
-    - address: 27
-      alias: strip2-r
-      groups: ["strip2","strip-r"]
-      mapping:
-        device: pca9685-2
-        port: 1
-      read_only: false
-    - address: 28
-      alias: strip2-g
-      groups: ["strip2","strip-g"]
-      mapping:
-        device: pca9685-2
-        port: 2
-      read_only: false
+      - port: 4
+        alias: kitchen-innen-g
+        tags: ["rgbw","green","kitchen"]
+      - port: 5
+        alias: kitchen-innen-r
+        tags: ["rgbw","red","kitchen"]
+      - port: 6
+        alias: kitchen-innen-b
+        tags: ["rgbw","blue","kitchen"]
+      - port: 7
+        alias: kitchen-innen-w
+        tags: ["rgbw","white","kitchen"]
 
-    - address: 29
-      alias: strip3-y
-      groups: ["strip3","strip-y"]
-      mapping:
-        device: pca9685-2
-        port: 13
-      read_only: false
-    - address: 30
-      alias: strip3-r
-      groups: ["strip3","strip-r"]
-      mapping:
-        device: pca9685-2
-        port: 14
-      read_only: false
-    - address: 31
-      alias: strip3-g
-      groups: ["strip3","strip-g"]
-      mapping:
-        device: pca9685-2
-        port: 15
-      read_only: false
+      - port: 8
+        alias: klo-r
+        tags: ["rgbw","red","klo"]
+      - port: 9
+        alias: klo-g
+        tags: ["rgbw","green","klo"]
+      - port: 10
+        alias: klo-b
+        tags: ["rgbw","blue","klo"]
+      - port: 11
+        alias: klo-w
+        tags: ["rgbw","white","klo"]
+
+      - port: 12
+        alias: kitchen-spots
+        tags: ["kitchen","spots"]
+        scaling:
+          linear:
+            from: 0
+            to: 35000
+  - type: pca9685_synchronized
+    alias: pca9685-2
+    config:
+      i2c_bus: "/dev/i2c-3"
+      i2c_slave_address: 66
+      use_external_clock: false
+      inverted: false
+      output_driver_totem_pole: true
+      update_interval_millis: 10
+      prescale: 3

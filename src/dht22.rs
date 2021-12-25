@@ -1,15 +1,14 @@
-use crate::device::{EventStream, HardwareDevice, VirtualDevice};
+use crate::device::{EventStream, HardwareDevice, InputHardwareDevice};
 use crate::device_core::{DeviceReadCore, SynchronizedDeviceReadCore};
 use crate::dht22_lib::ReadingError;
 use crate::{dht22_lib, prom, Result};
-use alloy::config::ValueScaling;
-use failure::ResultExt;
-use prometheus::core::{AtomicF64, AtomicI64, GenericCounter, GenericGauge};
+use alloy::config::{InputValue, InputValueType};
+use failure::{err_msg, ResultExt};
+use prometheus::core::{AtomicI64, GenericCounter};
 use rand::Rng;
 use rppal::gpio;
 use rppal::gpio::{Gpio, IoPin, Mode};
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -42,7 +41,10 @@ impl DHT22 {
             .context(format!("unable to get pin {} - maybe busy?", cfg.bcm_pin))?
             .into_io(Mode::Output);
 
-        let core = Arc::new(Mutex::new(DeviceReadCore::new(alias.clone(), 2)));
+        let core = SynchronizedDeviceReadCore::new_from_core(DeviceReadCore::new(
+            alias.clone(),
+            &[InputValueType::Temperature, InputValueType::Humidity],
+        ));
         let thread_core = core.clone();
         let adjust_priority = cfg.adjust_priority;
         let use_experimental_implementation = cfg.use_experimental_implementation;
@@ -72,8 +74,6 @@ impl DHT22 {
         readout_interval: Duration,
         use_experimental_implementation: bool,
     ) {
-        let temp_gauge = prom::TEMPERATURE.with_label_values(&[alias.as_str()]);
-        let humidity_gauge = prom::HUMIDITY.with_label_values(&[alias.as_str()]);
         let ok_counter = prom::DHT22_MEASUREMENTS.with_label_values(&[alias.as_str(), "ok"]);
         let checksum_error_counter =
             prom::DHT22_MEASUREMENTS.with_label_values(&[alias.as_str(), "checksum_error"]);
@@ -81,7 +81,7 @@ impl DHT22 {
             prom::DHT22_MEASUREMENTS.with_label_values(&[alias.as_str(), "timeout_error"]);
         let gpio_error_counter =
             prom::DHT22_MEASUREMENTS.with_label_values(&[alias.as_str(), "gpio_error"]);
-        let suspicous_value_counter =
+        let suspicious_value_counter =
             prom::DHT22_MEASUREMENTS.with_label_values(&[alias.as_str(), "suspicious_value"]);
 
         // de-sync in case we have multiple of these
@@ -96,16 +96,14 @@ impl DHT22 {
                 &mut pin,
                 adjust_priority,
                 use_experimental_implementation,
-                &temp_gauge,
-                &humidity_gauge,
                 &ok_counter,
                 &checksum_error_counter,
                 &timeout_error_counter,
                 &gpio_error_counter,
-                &suspicous_value_counter,
+                &suspicious_value_counter,
             );
 
-            // Sleep aftewards, so we get a fresh reading when the program starts.
+            // Sleep afterwards, so we get a fresh reading when the program starts.
             thread::sleep(readout_interval);
         }
     }
@@ -115,13 +113,11 @@ impl DHT22 {
         mut pin: &mut IoPin,
         adjust_priority: bool,
         use_experimental_implementation: bool,
-        temp_gauge: &GenericGauge<AtomicF64>,
-        humidity_gauge: &GenericGauge<AtomicF64>,
         ok_counter: &GenericCounter<AtomicI64>,
         checksum_error_counter: &GenericCounter<AtomicI64>,
         timeout_error_counter: &GenericCounter<AtomicI64>,
         gpio_error_counter: &GenericCounter<AtomicI64>,
-        suspicous_value_counter: &GenericCounter<AtomicI64>,
+        suspicious_value_counter: &GenericCounter<AtomicI64>,
     ) {
         let readings = if use_experimental_implementation {
             dht22_lib::read_pin_2(&mut pin, adjust_priority)
@@ -138,31 +134,42 @@ impl DHT22 {
                 // We occasionally get these readings with correct checksums, so we might as
                 // well guard against them...
                 if readings.humidity > 100_f32 {
+                    // TODO maybe handle this like an error
                     warn!(
                         "got suspicious reading from pin {}: {:?}",
                         pin.pin(),
                         readings
                     );
-                    suspicous_value_counter.inc();
+                    suspicious_value_counter.inc();
                     return;
                 }
 
-                let temp = alloy::map_temperature_to_value(readings.temperature as f64);
-                let humidity = alloy::map_relative_humidity_to_value(readings.humidity as f64);
-
                 {
-                    let mut core = core.lock().unwrap();
+                    let mut core = core.core.lock().unwrap();
 
-                    core.update_value_and_generate_events(ts, 0, temp);
-                    core.update_value_and_generate_events(ts, 1, humidity);
+                    core.update_value_and_generate_events(
+                        ts,
+                        0,
+                        Ok(InputValue::Temperature(readings.temperature as f64)),
+                    );
+                    core.update_value_and_generate_events(
+                        ts,
+                        1,
+                        Ok(InputValue::Humidity(readings.humidity as f64)),
+                    );
                 }
 
-                temp_gauge.set(readings.temperature as f64);
-                humidity_gauge.set(readings.humidity as f64);
                 ok_counter.inc();
             }
             Err(err) => {
                 warn!("unable to read from pin {}: {:?}", pin.pin(), err);
+
+                let msg = format!("{:?}", err);
+                {
+                    let mut core = core.core.lock().unwrap();
+                    core.set_error_on_all_ports(ts, msg)
+                }
+
                 match err {
                     ReadingError::Checksum => checksum_error_counter.inc(),
                     ReadingError::Timeout => timeout_error_counter.inc(),
@@ -174,20 +181,18 @@ impl DHT22 {
 }
 
 impl HardwareDevice for DHT22 {
-    fn alias(&self) -> String {
-        self.core.alias()
+    fn port_alias(&self, port: u8) -> Result<String> {
+        match port {
+            0 => Ok("temperature".to_string()),
+            1 => Ok("humidity".to_string()),
+            _ => Err(err_msg("DHT22 has two ports: temperature and humidity")),
+        }
     }
+}
 
-    fn update(&self) -> Result<()> {
-        Ok(())
-    }
-
-    fn get_virtual_device(
-        &self,
-        port: u8,
-        _scaling: Option<ValueScaling>,
-    ) -> Result<(Box<dyn VirtualDevice>, EventStream)> {
-        ensure!(port < 2, "DHT22 has two ports: 0=>temperature, 1=>humidity");
-        self.core.get_virtual_device(port, _scaling)
+impl InputHardwareDevice for DHT22 {
+    fn get_input_port(&self, port: u8) -> Result<(InputValueType, EventStream)> {
+        ensure!(port < 2, "DHT22 has two ports: temperature and humidity");
+        self.core.get_input_port(port)
     }
 }

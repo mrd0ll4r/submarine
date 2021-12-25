@@ -1,9 +1,12 @@
-use crate::device::{EventStream, HardwareDevice, VirtualDevice};
+use crate::config::ValueScaling;
+use crate::device::{
+    EventStream, HardwareDevice, InputHardwareDevice, OutputHardwareDevice, OutputPort,
+};
 use crate::Result;
-use alloy::config::ValueScaling;
+use alloy::config::{InputValue, InputValueType};
 use alloy::event::{Event, EventKind};
-use alloy::Value;
-use failure::{err_msg, Error};
+use alloy::OutputValue;
+use failure::err_msg;
 use futures::{Stream, StreamExt};
 use std::collections::VecDeque;
 use std::iter;
@@ -18,18 +21,20 @@ use std::task::{Context, Poll, Waker};
 #[derive(Debug)]
 pub(crate) struct DeviceReadCore {
     pub alias: String,
-    pub device_values: Vec<Value>,
+    pub device_values: Vec<Option<Result<InputValue>>>,
+    value_types: Vec<InputValueType>,
     pub events: Vec<Option<VecDeque<Event>>>,
     pub wakers: Vec<Option<Waker>>,
 }
 
 impl DeviceReadCore {
-    pub(crate) fn new(alias: String, count: usize) -> DeviceReadCore {
+    pub(crate) fn new(alias: String, value_types: &[InputValueType]) -> DeviceReadCore {
         DeviceReadCore {
             alias,
-            device_values: iter::repeat(0).take(count).collect(),
-            events: iter::repeat(None).take(count).collect(),
-            wakers: iter::repeat(None).take(count).collect(),
+            device_values: iter::repeat_with(|| None).take(value_types.len()).collect(),
+            events: iter::repeat(None).take(value_types.len()).collect(),
+            wakers: iter::repeat(None).take(value_types.len()).collect(),
+            value_types: value_types.iter().cloned().collect(),
         }
     }
 
@@ -69,15 +74,26 @@ impl DeviceReadCore {
         &mut self,
         ts: chrono::DateTime<chrono::Utc>,
         index: usize,
-        value: Value,
+        value: Result<InputValue>,
     ) {
+        assert!(index < self.events.len(), "device core index out of bounds");
         if let Some(events) = &mut self.events[index] {
-            if value != self.device_values[index] {
-                events.push_back(Event {
-                    timestamp: ts,
-                    inner: EventKind::Change { new_value: value },
-                });
-                self.device_values[index] = value;
+            match value {
+                Ok(value) => {
+                    events.push_back(Event {
+                        timestamp: ts,
+                        inner: Ok(EventKind::Update { new_value: value }),
+                    });
+                    self.device_values[index] = Some(Ok(value));
+                }
+                Err(e) => {
+                    let msg = format!("{:?}", e);
+                    events.push_back(Event {
+                        timestamp: ts,
+                        inner: Err(msg),
+                    });
+                    self.device_values[index] = Some(Err(e));
+                }
             }
 
             trace!("have {} events waiting for index {}", events.len(), index);
@@ -86,29 +102,53 @@ impl DeviceReadCore {
             }
         }
     }
+
+    pub(crate) fn set_error_on_all_ports(
+        &mut self,
+        ts: chrono::DateTime<chrono::Utc>,
+        error_message: String,
+    ) {
+        for i in 0..self.value_types.len() {
+            self.update_value_and_generate_events(ts, i, Err(err_msg(error_message.clone())))
+        }
+    }
+
+    fn port_alias(&self, port: u8) -> Result<String> {
+        ensure!(
+            (port as usize) < self.value_types.len(),
+            "invalid port number"
+        );
+        Ok(format!("port-{}", port))
+    }
 }
 
 /// A thread-safe version of a read-only device core.
 ///
 /// It provides functionality to derive a read-only virtual device from it, i.e. it implements the
 /// `HardwareDevice` trait.
-pub(crate) type SynchronizedDeviceReadCore = Arc<Mutex<DeviceReadCore>>;
+#[derive(Clone, Debug)]
+pub(crate) struct SynchronizedDeviceReadCore {
+    pub(crate) core: Arc<Mutex<DeviceReadCore>>,
+}
+
+impl SynchronizedDeviceReadCore {
+    pub(crate) fn new_from_core(core: DeviceReadCore) -> SynchronizedDeviceReadCore {
+        SynchronizedDeviceReadCore {
+            core: Arc::new(Mutex::new(core)),
+        }
+    }
+}
 
 impl HardwareDevice for SynchronizedDeviceReadCore {
-    fn alias(&self) -> String {
-        self.lock().unwrap().alias.clone()
+    fn port_alias(&self, port: u8) -> Result<String> {
+        let core = self.core.lock().unwrap();
+        core.port_alias(port)
     }
+}
 
-    fn update(&self) -> Result<()> {
-        Ok(())
-    }
-
-    fn get_virtual_device(
-        &self,
-        port: u8,
-        _scaling: Option<ValueScaling>,
-    ) -> Result<(Box<dyn VirtualDevice>, EventStream)> {
-        let mut core = self.lock().unwrap();
+impl InputHardwareDevice for SynchronizedDeviceReadCore {
+    fn get_input_port(&self, port: u8) -> Result<(InputValueType, EventStream)> {
+        let mut core = self.core.lock().unwrap();
         ensure!(
             (port as usize) < core.device_values.len(),
             "invalid port: {}",
@@ -120,10 +160,10 @@ impl HardwareDevice for SynchronizedDeviceReadCore {
 
         let dev = VirtualDeviceReadCore {
             index: port as usize,
-            core: self.clone(),
+            core: self.core.clone(),
         };
 
-        Ok((Box::new(dev.clone()), dev.boxed()))
+        Ok((*core.value_types.get(port as usize).unwrap(), dev.boxed()))
     }
 }
 
@@ -131,20 +171,7 @@ impl HardwareDevice for SynchronizedDeviceReadCore {
 #[derive(Clone, Debug)]
 struct VirtualDeviceReadCore {
     index: usize,
-    core: SynchronizedDeviceReadCore,
-}
-
-impl VirtualDevice for VirtualDeviceReadCore {
-    fn set(&self, _value: Value) -> Result<()> {
-        Err(err_msg("read-only"))
-    }
-
-    fn get(&self) -> Result<Value> {
-        let core = self.core.lock().unwrap();
-        assert!(self.index < core.device_values.len());
-
-        Ok(core.device_values[self.index])
-    }
+    core: Arc<Mutex<DeviceReadCore>>,
 }
 
 impl Stream for VirtualDeviceReadCore {
@@ -164,20 +191,23 @@ impl Stream for VirtualDeviceReadCore {
 #[derive(Debug)]
 pub(crate) struct DeviceRWCore {
     pub read_core: DeviceReadCore,
-    pub buffered_values: Vec<Value>,
+    pub buffered_values: Vec<OutputValue>,
     pub scalings: Vec<ValueScaling>,
     pub dirty: bool,
-    pub err: Option<Error>,
 }
 
 impl DeviceRWCore {
     pub(crate) fn new(alias: String, count: usize, default_scaling: ValueScaling) -> DeviceRWCore {
         DeviceRWCore {
-            read_core: DeviceReadCore::new(alias, count),
+            read_core: DeviceReadCore::new(
+                alias,
+                &iter::repeat(InputValueType::Continuous)
+                    .take(count)
+                    .collect::<Vec<_>>(),
+            ),
             buffered_values: iter::repeat(0).take(count).collect(),
             scalings: iter::repeat(default_scaling).take(count).collect(),
             dirty: false,
-            err: None,
         }
     }
 
@@ -195,7 +225,7 @@ impl DeviceRWCore {
     /// the buffered value.
     ///
     /// Panics on invalid index.
-    pub(crate) fn set(&mut self, index: usize, value: Value) {
+    pub(crate) fn set(&mut self, index: usize, value: OutputValue) {
         let old_val = self.buffered_values[index];
         self.buffered_values[index] = value;
         if value != old_val {
@@ -207,30 +237,38 @@ impl DeviceRWCore {
     /// places a possible error to be retrieved on future updates.
     pub(crate) fn finish_update(
         &mut self,
-        new_values: Vec<Value>,
+        new_values: Result<Vec<OutputValue>>,
         ts: chrono::DateTime<chrono::Utc>,
-        err: Option<Error>,
     ) {
-        match err {
-            None => {
-                self.update_and_generate_events(new_values, ts);
+        match new_values {
+            Ok(new_values) => {
+                self.update_and_generate_events(
+                    new_values
+                        .into_iter()
+                        .map(|v| Ok(InputValue::Continuous(v))),
+                    ts,
+                );
             }
-            Some(err) => {
+            Err(err) => {
                 // set dirty to make sure we try again next time
                 self.dirty = true;
-                self.err = Some(err)
+                let msg = format!("{:?}", err);
+                self.update_and_generate_events(
+                    iter::repeat_with(|| msg.clone())
+                        .take(self.buffered_values.len())
+                        .map(|v| Err(err_msg(v))),
+                    ts,
+                );
             }
         }
     }
 
-    fn update_and_generate_events(
+    fn update_and_generate_events<T: Iterator<Item = Result<InputValue>>>(
         &mut self,
-        new_values: Vec<Value>,
+        new_values: T,
         ts: chrono::DateTime<chrono::Utc>,
     ) {
-        assert_eq!(new_values.len(), self.buffered_values.len());
-
-        // generate events
+        // Generate events
         for (i, value) in new_values.into_iter().enumerate() {
             self.read_core
                 .update_value_and_generate_events(ts, i, value)
@@ -241,30 +279,37 @@ impl DeviceRWCore {
 /// A thread-safe version of a R/W device core.
 ///
 /// Implements the `HardwareDevice` trait.
-pub(crate) type SynchronizedDeviceRWCore = Arc<Mutex<DeviceRWCore>>;
+#[derive(Debug, Clone)]
+pub(crate) struct SynchronizedDeviceRWCore {
+    pub(crate) core: Arc<Mutex<DeviceRWCore>>,
+}
 
-impl HardwareDevice for SynchronizedDeviceRWCore {
-    fn alias(&self) -> String {
-        self.lock().unwrap().read_core.alias.clone()
-    }
-    fn update(&self) -> Result<()> {
-        let err = {
-            let mut core = self.lock().unwrap();
-            core.err.take()
-        };
-
-        match err {
-            Some(err) => Err(err),
-            None => Ok(()),
+impl SynchronizedDeviceRWCore {
+    pub(crate) fn new_from_core(core: DeviceRWCore) -> SynchronizedDeviceRWCore {
+        SynchronizedDeviceRWCore {
+            core: Arc::new(Mutex::new(core)),
         }
     }
+}
 
-    fn get_virtual_device(
+impl HardwareDevice for SynchronizedDeviceRWCore {
+    fn port_alias(&self, port: u8) -> Result<String> {
+        let core = self.core.lock().unwrap();
+        core.read_core.port_alias(port)
+    }
+}
+
+impl OutputHardwareDevice for SynchronizedDeviceRWCore {
+    fn update(&self) -> Result<()> {
+        Ok(()) // I guess?
+    }
+
+    fn get_output_port(
         &self,
         port: u8,
         scaling: Option<ValueScaling>,
-    ) -> Result<(Box<dyn VirtualDevice>, EventStream)> {
-        let mut core = self.lock().unwrap();
+    ) -> Result<(Box<dyn OutputPort>, EventStream)> {
+        let mut core = self.core.lock().unwrap();
         ensure!(
             (port as usize) < core.read_core.device_values.len(),
             "invalid port: {}",
@@ -280,7 +325,7 @@ impl HardwareDevice for SynchronizedDeviceRWCore {
 
         let dev = VirtualRWDeviceCore {
             index: port as usize,
-            core: self.clone(),
+            core: self.core.clone(),
         };
 
         Ok((Box::new(dev.clone()), dev.boxed()))
@@ -291,23 +336,16 @@ impl HardwareDevice for SynchronizedDeviceRWCore {
 #[derive(Clone, Debug)]
 struct VirtualRWDeviceCore {
     index: usize,
-    core: SynchronizedDeviceRWCore,
+    core: Arc<Mutex<DeviceRWCore>>,
 }
 
-impl VirtualDevice for VirtualRWDeviceCore {
-    fn set(&self, value: Value) -> Result<()> {
+impl OutputPort for VirtualRWDeviceCore {
+    fn set(&self, value: OutputValue) -> Result<()> {
         let mut core = self.core.lock().unwrap();
         assert!(self.index < core.buffered_values.len());
         core.set(self.index, value);
 
         Ok(())
-    }
-
-    fn get(&self) -> Result<Value> {
-        let core = self.core.lock().unwrap();
-        assert!(self.index < core.read_core.device_values.len());
-
-        Ok(core.read_core.device_values[self.index])
     }
 }
 

@@ -1,17 +1,16 @@
-use crate::device::{EventStream, HardwareDevice, VirtualDevice};
+use crate::config::ValueScaling;
+use crate::device::{EventStream, HardwareDevice, OutputHardwareDevice, OutputPort};
 use crate::device_core::{DeviceRWCore, SynchronizedDeviceRWCore};
 use crate::poll;
 use crate::prom;
 use crate::Result;
-use alloy::config::ValueScaling;
-use alloy::{Value, HIGH, LOW};
+use alloy::{OutputValue, HIGH, LOW};
 use embedded_hal as hal;
 use failure::ResultExt;
 use itertools::Itertools;
 use pwm_pca9685 as pwmdev;
 use pwm_pca9685::Pca9685;
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -124,11 +123,11 @@ impl PCA9685 {
     {
         let dev = set_up_device(dev, config)?;
 
-        let inner = Arc::new(Mutex::new(DeviceRWCore::new_dirty(
+        let inner = SynchronizedDeviceRWCore::new_from_core(DeviceRWCore::new_dirty(
             alias.clone(),
             16,
             ValueScaling::Logarithmic,
-        )));
+        ));
         let inner_thread = inner.clone();
 
         let update_interval_milliseconds = config.update_interval_millis;
@@ -175,7 +174,7 @@ impl PCA9685 {
     }
 
     pub(crate) fn handle_update_async_inner_outer<I2C, E>(
-        values: &[Value],
+        values: &[OutputValue],
         scalings: Vec<ValueScaling>,
         dirty: bool,
         dev: &mut Pca9685Device<I2C>,
@@ -224,7 +223,7 @@ impl PCA9685 {
     }
 
     fn handle_update_async_inner<I2C, E>(
-        values: &[Value],
+        values: &[OutputValue],
         scalings: Vec<ValueScaling>,
         dev: &mut pwmdev::Pca9685<I2C>,
         metric: &prometheus::Histogram,
@@ -282,7 +281,7 @@ impl PCA9685 {
         }
     }
 
-    fn calculate_on_off_values(values: &[Value], scalings: Vec<ValueScaling>) -> Vec<u16> {
+    fn calculate_on_off_values(values: &[OutputValue], scalings: Vec<ValueScaling>) -> Vec<u16> {
         // TODO figure this out - use offsets to balance stuff?
         /*let offsets: Vec<u16> = (0..16_usize)
         .map(|n| Self::OFFSET[n % 4] + Self::OFFSET[n / 4])
@@ -336,20 +335,25 @@ impl PCA9685 {
     //const OFFSET: [u16; 4] = [0, 1024, 2048, 3072];
 }
 
-impl HardwareDevice for PCA9685 {
-    fn alias(&self) -> String {
-        self.core.alias()
-    }
+impl OutputHardwareDevice for PCA9685 {
     fn update(&self) -> Result<()> {
-        self.core.update()
+        // NOP, because we update regularly anyway
+        Ok(())
     }
 
-    fn get_virtual_device(
+    fn get_output_port(
         &self,
         port: u8,
         scaling: Option<ValueScaling>,
-    ) -> Result<(Box<dyn VirtualDevice>, EventStream)> {
+    ) -> Result<(Box<dyn OutputPort>, EventStream)> {
         ensure!(port < 16, "PCA9685 has 16 ports only");
-        self.core.get_virtual_device(port, scaling)
+        self.core.get_output_port(port, scaling)
+    }
+}
+
+impl HardwareDevice for PCA9685 {
+    fn port_alias(&self, port: u8) -> Result<String> {
+        ensure!(port < 16, "PCA9685 has 16 ports only");
+        Ok(format!("port-{}", port))
     }
 }

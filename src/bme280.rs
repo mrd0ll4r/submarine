@@ -1,17 +1,16 @@
-use crate::device::{EventStream, HardwareDevice, VirtualDevice};
+use crate::device::{EventStream, HardwareDevice, InputHardwareDevice};
 use crate::device_core::{DeviceReadCore, SynchronizedDeviceReadCore};
 use crate::prom;
 use crate::Result;
-use alloy::config::ValueScaling;
+use alloy::config::{InputValue, InputValueType};
 use bme280;
 use embedded_hal as hal;
 use failure::*;
 use linux_embedded_hal;
-use prometheus::core::{AtomicF64, AtomicI64, GenericCounter, GenericGauge};
+use prometheus::core::{AtomicI64, GenericCounter};
 use prometheus::Histogram;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -47,7 +46,14 @@ impl BME280 {
             .init()
             .map_err(|e| failure::err_msg(format!("unable to init: {:?}", e)))?;
 
-        let inner = Arc::new(Mutex::new(DeviceReadCore::new(alias.clone(), 3)));
+        let inner = SynchronizedDeviceReadCore::new_from_core(DeviceReadCore::new(
+            alias.clone(),
+            &[
+                InputValueType::Temperature,
+                InputValueType::Humidity,
+                InputValueType::Pressure,
+            ],
+        ));
         let thread_inner = inner.clone();
 
         let readout_interval = config.readout_interval_seconds;
@@ -75,9 +81,7 @@ impl BME280 {
         let readout_duration_histogram = prom::BME280_READ_DURATION
             .get_metric_with_label_values(&[&alias])
             .unwrap();
-        let temp_gauge = prom::TEMPERATURE.with_label_values(&[alias.as_str()]);
-        let humidity_gauge = prom::HUMIDITY.with_label_values(&[alias.as_str()]);
-        let pressure_gauge = prom::PRESSURE.with_label_values(&[alias.as_str()]);
+
         let ok_counter = prom::BME280_MEASUREMENTS.with_label_values(&[alias.as_str(), "ok"]);
         let compensation_error_counter =
             prom::BME280_MEASUREMENTS.with_label_values(&[alias.as_str(), "compensation_failed"]);
@@ -101,9 +105,6 @@ impl BME280 {
                 &alias,
                 &mut dev,
                 &core,
-                &temp_gauge,
-                &humidity_gauge,
-                &pressure_gauge,
                 &ok_counter,
                 &compensation_error_counter,
                 &i2c_error_counter,
@@ -122,9 +123,6 @@ impl BME280 {
         alias: &str,
         dev: &mut bme280::BME280<I2C, linux_embedded_hal::Delay>,
         core: &SynchronizedDeviceReadCore,
-        temp_gauge: &GenericGauge<AtomicF64>,
-        humidity_gauge: &GenericGauge<AtomicF64>,
-        pressure_gauge: &GenericGauge<AtomicF64>,
         ok_counter: &GenericCounter<AtomicI64>,
         compensation_error_counter: &GenericCounter<AtomicI64>,
         i2c_error_counter: &GenericCounter<AtomicI64>,
@@ -156,25 +154,37 @@ impl BME280 {
                     alias, readings
                 );
 
-                let temp = alloy::map_temperature_to_value(readings.temperature as f64);
-                let humidity = alloy::map_relative_humidity_to_value(readings.humidity as f64);
-                let pressure = alloy::map_pressure_to_value(readings.pressure as f64);
-
                 {
-                    let mut core = core.lock().unwrap();
+                    let mut core = core.core.lock().unwrap();
 
-                    core.update_value_and_generate_events(ts, 0, temp);
-                    core.update_value_and_generate_events(ts, 1, humidity);
-                    core.update_value_and_generate_events(ts, 2, pressure);
+                    core.update_value_and_generate_events(
+                        ts,
+                        0,
+                        Ok(InputValue::Temperature(readings.temperature as f64)),
+                    );
+                    core.update_value_and_generate_events(
+                        ts,
+                        1,
+                        Ok(InputValue::Humidity(readings.humidity as f64)),
+                    );
+                    core.update_value_and_generate_events(
+                        ts,
+                        2,
+                        Ok(InputValue::Pressure(readings.pressure as f64)),
+                    );
                 }
 
-                temp_gauge.set(readings.temperature as f64);
-                humidity_gauge.set(readings.humidity as f64);
-                pressure_gauge.set(readings.pressure as f64);
                 ok_counter.inc();
             }
             Err(err) => {
                 warn!("unable to read BME280 {}: {:?}", alias, err);
+
+                let msg = format!("{:?}", err);
+                {
+                    let mut core = core.core.lock().unwrap();
+                    core.set_error_on_all_ports(ts, msg)
+                }
+
                 match err {
                     bme280::Error::CompensationFailed => {
                         compensation_error_counter.inc();
@@ -198,24 +208,24 @@ impl BME280 {
 }
 
 impl HardwareDevice for BME280 {
-    fn alias(&self) -> String {
-        self.inner.alias()
+    fn port_alias(&self, port: u8) -> Result<String> {
+        match port {
+            0 => Ok("temperature".to_string()),
+            1 => Ok("humidity".to_string()),
+            2 => Ok("pressure".to_string()),
+            _ => Err(err_msg(
+                "BME280 has three ports: temperature, humidity, and pressure",
+            )),
+        }
     }
+}
 
-    fn update(&self) -> Result<()> {
-        // TODO ?
-        Ok(())
-    }
-
-    fn get_virtual_device(
-        &self,
-        port: u8,
-        _scaling: Option<ValueScaling>,
-    ) -> Result<(Box<dyn VirtualDevice>, EventStream)> {
+impl InputHardwareDevice for BME280 {
+    fn get_input_port(&self, port: u8) -> Result<(InputValueType, EventStream)> {
         ensure!(
             port < 3,
-            "BME280 has 3 ports: temperature, humidity, and pressure"
+            "BME280 has three ports: temperature, humidity, and pressure"
         );
-        self.inner.get_virtual_device(port, _scaling)
+        self.inner.get_input_port(port)
     }
 }

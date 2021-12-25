@@ -1,16 +1,14 @@
-use crate::device::{EventStream, HardwareDevice, VirtualDevice};
+use crate::device::{EventStream, HardwareDevice, InputHardwareDevice};
 use crate::device_core::{DeviceReadCore, SynchronizedDeviceReadCore};
 use crate::mcp23017::{MCP23017Config, MCP23017};
 use crate::prom;
 use crate::{poll, Result};
-use alloy::config::ValueScaling;
+use alloy::config::{InputValue, InputValueType};
 use alloy::event::{ButtonEvent, Event, EventKind};
-use alloy::{HIGH, LOW};
 use embedded_hal as hal;
 use failure::*;
 use mcp23017 as mcpdev;
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -57,7 +55,12 @@ impl MCP23017Input {
         mcp.all_pin_mode(mcpdev::PinMode::INPUT)
             .map_err(|e| failure::err_msg(format!("{:?}", e)))?;
 
-        let inner = Arc::new(Mutex::new(DeviceReadCore::new(alias.clone(), 16)));
+        let inner = SynchronizedDeviceReadCore::new_from_core(DeviceReadCore::new(
+            alias.clone(),
+            &std::iter::repeat(InputValueType::Binary)
+                .take(16)
+                .collect::<Vec<_>>(),
+        ));
         let down = [
             Instant::now(),
             Instant::now(),
@@ -121,13 +124,13 @@ impl MCP23017Input {
             );
             last_wakeup = wake_up;
 
-            let mut state = inner.lock().unwrap();
+            let mut core = inner.core.lock().unwrap();
 
             // Get new values, generate events
             let res = MCP23017Input::update_inner(
-                &mut state,
+                &mut core,
                 wake_up,
-                ts,
+                ts.clone(),
                 &mut dev,
                 &hist,
                 &mut down,
@@ -137,6 +140,7 @@ impl MCP23017Input {
 
             if let Err(e) = res {
                 warn!("{}: unable to read values: {:?}", alias, e);
+                core.set_error_on_all_ports(ts, format!("{:?}", e))
             }
 
             let (s, lagging) = poll::calculate_sleep_duration(wake_up, polling_interval);
@@ -152,7 +156,7 @@ impl MCP23017Input {
     }
 
     fn update_inner<I2C, E>(
-        state: &mut DeviceReadCore,
+        core: &mut DeviceReadCore,
         mono_ts: Instant,
         real_ts: chrono::DateTime<chrono::Utc>,
         dev: &mut mcpdev::MCP23017<I2C>,
@@ -191,71 +195,70 @@ impl MCP23017Input {
         }
 
         for (i, new_val) in new_values.iter().enumerate() {
-            let previous_val = state.device_values[i] == HIGH;
-            let down_for = mono_ts.duration_since(down[i]);
+            if let Some(ref previous_val) = core.device_values[i] {
+                if let Ok(previous_val) = previous_val {
+                    let previous_val = *previous_val == InputValue::Binary(true);
+                    let down_for = mono_ts.duration_since(down[i]);
 
-            if *new_val && !previous_val {
-                // Down
-                if let Some(events) = &mut state.events[i] {
-                    events.push_back(Event {
-                        timestamp: real_ts,
-                        inner: EventKind::Button(ButtonEvent::Down),
-                    });
-                }
-                down[i] = mono_ts;
-                down_secs[i] = 0;
-            } else if !*new_val && previous_val {
-                // Up
-                if let Some(events) = &mut state.events[i] {
-                    events.push_back(Event {
-                        timestamp: real_ts,
-                        inner: EventKind::Button(ButtonEvent::Up),
-                    });
-                    events.push_back(Event {
-                        timestamp: real_ts,
-                        inner: EventKind::Button(ButtonEvent::Clicked { duration: down_for }),
-                    });
-                }
-            } else if *new_val {
-                // No change (because other arms didn't match)
-                // And was down, so is still down
-                // So process this as a long-press
-                if down_for.as_secs() > down_secs[i] {
-                    down_secs[i] = down_for.as_secs();
-                    if let Some(events) = &mut state.events[i] {
-                        events.push_back(Event {
-                            timestamp: real_ts,
-                            inner: EventKind::Button(ButtonEvent::LongPress {
-                                seconds: down_secs[i],
-                            }),
-                        });
+                    if *new_val && !previous_val {
+                        // Down
+                        if let Some(events) = &mut core.events[i] {
+                            events.push_back(Event {
+                                timestamp: real_ts,
+                                inner: Ok(EventKind::Button(ButtonEvent::Down)),
+                            });
+                        }
+                        down[i] = mono_ts;
+                        down_secs[i] = 0;
+                    } else if !*new_val && previous_val {
+                        // Up
+                        if let Some(events) = &mut core.events[i] {
+                            events.push_back(Event {
+                                timestamp: real_ts,
+                                inner: Ok(EventKind::Button(ButtonEvent::Up)),
+                            });
+                            events.push_back(Event {
+                                timestamp: real_ts,
+                                inner: Ok(EventKind::Button(ButtonEvent::Clicked {
+                                    duration: down_for,
+                                })),
+                            });
+                        }
+                    } else if *new_val {
+                        // No change (because other arms didn't match)
+                        // And was down, so is still down
+                        // So process this as a long-press
+                        if down_for.as_secs() > down_secs[i] {
+                            down_secs[i] = down_for.as_secs();
+                            if let Some(events) = &mut core.events[i] {
+                                events.push_back(Event {
+                                    timestamp: real_ts,
+                                    inner: Ok(EventKind::Button(ButtonEvent::LongPress {
+                                        seconds: down_secs[i],
+                                    })),
+                                });
+                            }
+                        }
                     }
                 }
             }
 
-            state.update_value_and_generate_events(real_ts, i, if *new_val { HIGH } else { LOW });
+            core.update_value_and_generate_events(real_ts, i, Ok(InputValue::Binary(*new_val)));
         }
 
         Ok(())
     }
 }
 
-impl HardwareDevice for MCP23017Input {
-    fn alias(&self) -> String {
-        self.inner.alias()
-    }
-
-    fn update(&self) -> Result<()> {
-        // TODO ?
-        Ok(())
-    }
-
-    fn get_virtual_device(
-        &self,
-        port: u8,
-        _scaling: Option<ValueScaling>,
-    ) -> Result<(Box<dyn VirtualDevice>, EventStream)> {
+impl InputHardwareDevice for MCP23017Input {
+    fn get_input_port(&self, port: u8) -> Result<(InputValueType, EventStream)> {
         ensure!(port < 16, "MCP23017 has 16 ports only");
-        self.inner.get_virtual_device(port, _scaling)
+        self.inner.get_input_port(port)
+    }
+}
+
+impl HardwareDevice for MCP23017Input {
+    fn port_alias(&self, port: u8) -> Result<String> {
+        MCP23017::compute_port_alias(port)
     }
 }

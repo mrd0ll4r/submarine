@@ -1,46 +1,91 @@
-config:
-  devices:
-    - type: dht22
-      alias: dht-1
-      config:
-        bcm_pin: 26
-        adjust_priority: true
-        use_experimental_version: true
-        readout_interval_seconds: 2
-    - type: dht22
-      alias: dht-2
-      config:
-        bcm_pin: 13
-        adjust_priority: true
-        use_experimental_version: false
-        readout_interval_seconds: 2
-  virtual_devices:
-    - address: 100
-      alias: dht1-temp
-      groups: ["temp"]
-      mapping:
-        device: dht-1
-        port: 0
-      read_only: true
-    - address: 101
-      alias: dht1-humidity
-      groups: ["humidity"]
-      mapping:
-        device: dht-1
-        port: 1
-      read_only: true
-
-    - address: 102
-      alias: dht2-temp
-      groups: ["temp"]
-      mapping:
-        device: dht-2
-        port: 0
-      read_only: true
-    - address: 103
-      alias: dht2-humidity
-      groups: ["humidity"]
-      mapping:
-        device: dht-2
-        port: 1
-      read_only: true
+devices:
+  - type: dht22
+    alias: dht-1
+    tags: ["dht22","basement"]
+    config:
+      bcm_pin: 19
+      adjust_priority: true
+      use_experimental_implementation: true
+      readout_interval_seconds: 3
+    inputs:
+      - port: 0
+        alias: dht-1-temp
+        tags: ["temp"]
+      - port: 1
+        alias: dht-1-humidity
+        tags: ["humidity"]
+  - type: dht22
+    alias: dht-2
+    tags: ["dht22","basement"]
+    config:
+      bcm_pin: 16
+      adjust_priority: true
+      use_experimental_implementation: true
+      readout_interval_seconds: 3
+    inputs:
+      - port: 0
+        alias: dht-2-temp
+        tags: [ "temp" ]
+      - port: 1
+        alias: dht-2-humidity
+        tags: [ "humidity" ]
+  - type: dht22
+    alias: dht-kitchen
+    tags: ["dht22","kitchen"]
+    config:
+      bcm_pin: 26
+      adjust_priority: true
+      use_experimental_implementation: true
+      readout_interval_seconds: 3
+    inputs:
+      - port: 0
+        alias: dht-kitchen-temp
+        tags: [ "temp" ]
+      - port: 1
+        alias: dht-kitchen-humidity
+        tags: [ "humidity" ]
+  - type: dht22
+    alias: dht-wolle
+    tags: ["dht22","wolle"]
+    config:
+      bcm_pin: 20
+      adjust_priority: true
+      use_experimental_implementation: true
+      readout_interval_seconds: 3
+    inputs:
+      - port: 0
+        alias: dht-wolle-temp
+        tags: [ "temp" ]
+      - port: 1
+        alias: dht-wolle-humidity
+        tags: [ "humidity" ]
+  - type: dht22
+    alias: am-ecke-hinten
+    tags: ["am2302","outside"]
+    config:
+      bcm_pin: 21
+      adjust_priority: true
+      use_experimental_implementation: true
+      readout_interval_seconds: 3
+    inputs:
+      - port: 0
+        alias: am-ecke-hinten-temp
+        tags: [ "temp" ]
+      - port: 1
+        alias: am-ecke-hinten-humidity
+        tags: [ "humidity" ]
+  - type: dht22
+    alias: am-keller
+    tags: ["am2302","keller"]
+    config:
+      bcm_pin: 25
+      adjust_priority: true
+      use_experimental_implementation: true
+      readout_interval_seconds: 3
+    inputs:
+      - port: 0
+        alias: am-keller-temp
+        tags: [ "temp" ]
+      - port: 1
+        alias: am-keller-humidity
+        tags: [ "humidity" ]

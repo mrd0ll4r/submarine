@@ -1,10 +1,7 @@
-use crate::device::DeviceState;
-use crate::event::EventPublishers;
+use crate::device::UniverseState;
 use crate::prom;
 use crate::Result;
-use alloy::api::{
-    APIRequest, APIResult, Message, SetRequest, SetRequestTarget, SubscriptionRequest,
-};
+use alloy::api::{APIRequest, APIResult, Message, SetRequest, SubscriptionRequest};
 use alloy::event::{AddressedEvent, EventFilter};
 use alloy::tcp::Connection;
 use alloy::Address;
@@ -24,11 +21,7 @@ use tokio::sync::broadcast;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::task;
 
-pub(crate) async fn run_server(
-    addr: SocketAddr,
-    state: Arc<Mutex<DeviceState>>,
-    event_publishers: Arc<EventPublishers>,
-) -> Result<()> {
+pub(crate) async fn run_server(addr: SocketAddr, state: Arc<Mutex<UniverseState>>) -> Result<()> {
     let listener = TcpListener::bind(addr).await?;
 
     loop {
@@ -39,11 +32,10 @@ pub(crate) async fn run_server(
 
         // Set up all the stuff we need for a client.
         let state = state.clone();
-        let publishers = event_publishers.clone();
 
         // Spawn our handler to be run asynchronously.
         tokio::spawn(async move {
-            if let Err(e) = Client::new(state, publishers, stream).await {
+            if let Err(e) = Client::new(state, stream).await {
                 error!("unable to handle client: {:?}", e);
             }
         });
@@ -55,23 +47,15 @@ pub(crate) struct Client {
 }
 
 impl Client {
-    fn set_inner(state: &mut DeviceState, reqs: Vec<SetRequest>) -> Result<()> {
+    async fn handle_set_request(state: &mut UniverseState, reqs: Vec<SetRequest>) -> Result<()> {
         for req in reqs {
-            match req.target {
-                SetRequestTarget::Address(address) => {
-                    state
-                        .set_address(address, req.value)
-                        .context("unable to set address")?;
-                }
-                SetRequestTarget::Group(group) => {
-                    state
-                        .set_group(&group, req.value)
-                        .context("unable to set group")?;
-                }
-            }
+            state
+                .set_address(req.address, req.value)
+                .await
+                .context("unable to set address")?;
         }
 
-        state.update().context("unable to update hardware")?;
+        state.update().await.context("unable to update hardware")?;
 
         Ok(())
     }
@@ -80,7 +64,7 @@ impl Client {
         remote: &SocketAddr,
         subscriptions: Arc<HashMap<Address, Mutex<Option<EventFilter>>>>,
         req: SubscriptionRequest,
-        event_producers: Arc<EventPublishers>,
+        state: &Arc<Mutex<UniverseState>>,
         event_sink: Sender<AddressedEvent>,
     ) -> Result<()> {
         let filters = subscriptions.get(&req.address);
@@ -97,7 +81,11 @@ impl Client {
         });
 
         if was_empty {
-            let mut event_stream = event_producers.get(&req.address).unwrap().subscribe();
+            let mut event_stream = state
+                .lock()
+                .await
+                .get_event_stream(req.address)
+                .context("invalid address")?;
             let address = req.address;
             let remote = remote.clone();
             let subscriptions = subscriptions.clone();
@@ -167,51 +155,33 @@ impl Client {
 
     async fn handle_request(
         remote: SocketAddr,
-        state: Arc<Mutex<DeviceState>>,
+        state: Arc<Mutex<UniverseState>>,
         req: APIRequest,
         event_sink: Sender<AddressedEvent>,
-        event_producers: Arc<EventPublishers>,
         subscriptions: Arc<HashMap<Address, Mutex<Option<EventFilter>>>>,
     ) -> Result<APIResult> {
         match req {
             APIRequest::SystemTime => Ok(APIResult::SystemTime(chrono::Utc::now())),
             APIRequest::Ping => Ok(APIResult::Ping),
-            APIRequest::Get(address) => {
-                let state = state.lock().await;
-                let value = state.get_address(address)?;
-                Ok(APIResult::Get(value))
-            }
             APIRequest::Set(set_requests) => {
                 let mut state = state.lock().await;
-                Self::set_inner(&mut state, set_requests)?;
+                Self::handle_set_request(&mut state, set_requests).await?;
                 Ok(APIResult::Set)
             }
             APIRequest::Subscribe(req) => {
-                Self::handle_subscription_request(
-                    &remote,
-                    subscriptions,
-                    req,
-                    event_producers,
-                    event_sink,
-                )
-                .await?;
+                Self::handle_subscription_request(&remote, subscriptions, req, &state, event_sink)
+                    .await?;
                 Ok(APIResult::Subscribe)
-            }
-            APIRequest::Devices => {
-                let state = state.lock().await;
-                let devices = state.virtual_device_configs.clone();
-                Ok(APIResult::Devices(devices))
             }
         }
     }
 
     async fn handle_incoming_messages(
-        state: Arc<Mutex<DeviceState>>,
+        state: Arc<Mutex<UniverseState>>,
         remote: SocketAddr,
         mut input: Receiver<Message>,
         output: Sender<Message>,
         event_sink: Sender<AddressedEvent>,
-        event_producers: Arc<EventPublishers>,
         subscriptions: Arc<HashMap<Address, Mutex<Option<EventFilter>>>>,
     ) {
         while let Some(msg) = input.recv().await {
@@ -228,6 +198,10 @@ impl Client {
                     error!("handler {}: received response packet", remote);
                     break;
                 }
+                Message::Config(_) => {
+                    error!("handler {}: received config packet", remote);
+                    break;
+                }
                 Message::Request { id, inner } => {
                     debug!(
                         "handler {}: received request with ID {}: {:?}",
@@ -238,18 +212,11 @@ impl Client {
                     let event_sink = event_sink.clone();
                     let subscriptions = subscriptions.clone();
                     let output = output.clone();
-                    let producers = event_producers.clone();
                     task::spawn(async move {
-                        let result = Self::handle_request(
-                            remote,
-                            state,
-                            inner,
-                            event_sink,
-                            producers,
-                            subscriptions,
-                        )
-                        .await
-                        .map_err(|e| format!("{:?}", e));
+                        let result =
+                            Self::handle_request(remote, state, inner, event_sink, subscriptions)
+                                .await
+                                .map_err(|e| format!("{:?}", e));
 
                         let res = output.send(Message::Response { id, inner: result }).await;
                         if let Err(_) = res {
@@ -263,11 +230,7 @@ impl Client {
         debug!("handler {}: shutting down", remote);
     }
 
-    pub(crate) async fn new(
-        state: Arc<Mutex<DeviceState>>,
-        event_producers: Arc<EventPublishers>,
-        conn: TcpStream,
-    ) -> Result<Client> {
+    pub(crate) async fn new(state: Arc<Mutex<UniverseState>>, conn: TcpStream) -> Result<Client> {
         let conn = Connection::new(conn).await?;
         let remote = conn.remote;
         let messages_out = conn.messages_out.clone();
@@ -276,11 +239,28 @@ impl Client {
 
         let (event_sink, event_stream) = channel::<AddressedEvent>(100);
 
-        let mut subscriptions = HashMap::new();
-        let virtual_devices = state.lock().await.virtual_device_configs.clone();
-        for cfg in virtual_devices {
-            subscriptions.insert(cfg.address, Mutex::new(None));
-        }
+        // We have to push two things to the client:
+        // - The current universe config
+        // - Update events for every input, containing the last known value
+        let (cfg, update_events) = {
+            let state = state.lock().await;
+            let cfg = state.to_alloy_universe_config().await;
+            let update_events = state.get_update_events_for_current_values().await;
+            (cfg, update_events)
+        };
+
+        let subscriptions = cfg
+            .devices
+            .iter()
+            .map(|dev| {
+                dev.inputs
+                    .iter()
+                    .map(|input| input.address)
+                    .chain(dev.outputs.iter().map(|output| output.address))
+            })
+            .flatten()
+            .map(|addr| (addr, Mutex::new(None)))
+            .collect();
 
         task::spawn(Self::handle_incoming_messages(
             state,
@@ -288,7 +268,6 @@ impl Client {
             messages_in,
             messages_out2,
             event_sink,
-            event_producers,
             Arc::new(subscriptions),
         ));
 
@@ -297,7 +276,7 @@ impl Client {
                 inner: event_stream,
                 buf: Vec::new(),
                 fused: false,
-                chunk_size: 50,
+                chunk_size: 10,
             };
 
             while let Some(addressed) = buf.next().await {
@@ -316,6 +295,16 @@ impl Client {
 
             debug!("event_buffer {}: shutting down", remote);
         });
+
+        // Push the things
+        conn.messages_out
+            .send(Message::Config(cfg))
+            .await
+            .context("unable to push universe config to client")?;
+        conn.messages_out
+            .send(Message::Events(update_events))
+            .await
+            .context("unable to push initial values to client")?;
 
         Ok(Client { remote })
     }

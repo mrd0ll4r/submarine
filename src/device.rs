@@ -1,28 +1,35 @@
-use crate::config::{AggregatedConfig, DeviceConfig};
+use crate::config::{AggregatedConfig, BaseMappingConfig, DeviceConfig, ValueScaling};
 use crate::device_core::{DeviceRWCore, SynchronizedDeviceRWCore};
 use crate::dht22::DHT22;
 use crate::ds18::DS18;
 use crate::gpio::GPIO;
 use crate::pca9685::PCA9685Config;
 use crate::pca9685_sync::PCA9685Synchronized;
+use crate::prom;
 use crate::Result;
 use crate::{config, i2c_mock, mcp23017, mcp23017_input, pca9685};
-use alloy::config::{MappingConfig, ValueScaling, VirtualDeviceConfig};
-use alloy::event::Event;
-use alloy::{Address, Value};
-use failure::{format_err, ResultExt};
-use futures::Stream;
+use alloy::config::{InputValue, InputValueType};
+use alloy::event::{AddressedEvent, Event, EventKind};
+use alloy::{Address, OutputValue};
+use failure::{err_msg, format_err, ResultExt};
+use futures::{Stream, StreamExt};
 use itertools::Itertools;
 use linux_embedded_hal as linux_hal;
-use std::collections::{HashMap, VecDeque};
+use prometheus::core::{AtomicF64, AtomicI64, GenericCounter, GenericGauge};
+use std::cell::Cell;
+use std::collections::{HashMap, HashSet};
+use std::fmt::{Debug, Formatter};
+use std::ops::Deref;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tokio::sync::broadcast::Sender;
+use tokio::sync::Mutex;
 
-/// Encapsulates all functionality a hardware device must provide.
 pub(crate) trait HardwareDevice: Send {
-    /// Returns the alias this device was configured with
-    fn alias(&self) -> String;
+    fn port_alias(&self, port: u8) -> Result<String>;
+}
 
+pub(crate) trait OutputHardwareDevice: HardwareDevice {
     /// Triggers an asynchronous update and retrieves any error from previous update(s).
     ///
     /// If the hardware device does not implement asynchronous updates that need to be triggered
@@ -32,358 +39,398 @@ pub(crate) trait HardwareDevice: Send {
     /// Gets a VirtualDevice and event source for the given port.
     ///
     /// Note that it is generally impossible to map the same port twice.
-    fn get_virtual_device(
+    fn get_output_port(
         &self,
         port: u8,
         scaling: Option<ValueScaling>,
-    ) -> Result<(Box<dyn VirtualDevice>, EventStream)>;
+    ) -> Result<(Box<dyn OutputPort>, EventStream)>;
+}
+
+pub(crate) trait InputHardwareDevice: HardwareDevice {
+    fn get_input_port(&self, port: u8) -> Result<(InputValueType, EventStream)>;
 }
 
 /// An event stream is an asynchronous Stream of events.
 ///
 /// The asynchronous nature does not usually matter, as this is all handled by some magic in tokio.
-/// For all intents and purposes, this behaves like an iterator of vectors of events.
+/// For all intents and purposes, this behaves like an iterator over events.
 pub(crate) type EventStream = Pin<Box<dyn Stream<Item = Event> + Send>>;
 
 /// A virtual device is what is exposed by the API to the outside world and mapped to a hardware
 /// device.
-pub(crate) trait VirtualDevice: Send {
+pub(crate) trait OutputPort: Send {
     /// Sets the _buffered_ value of this virtual device.
     ///
-    /// The value will only be written to the hardware once the `HardwareDevice` updates.
-    fn set(&self, value: Value) -> Result<()>;
-
-    /// Gets the _device_ value of this virtual device.
-    ///
-    /// The device value is the value that was last written to the hardware.
-    /// This might not be the value that was previously set with `set`, because that might still
-    /// be buffered.
-    fn get(&self) -> Result<Value>;
+    /// The value will only be written to the hardware once the `OutputHardwareDevice` updates.
+    fn set(&self, value: OutputValue) -> Result<()>;
 }
 
-/// An error during an update operation on a hardware device.
-pub(crate) struct TimestampedUpdateError {
-    alias: String,
-    timestamp: chrono::DateTime<chrono::Utc>,
-    error: failure::Error,
+pub(crate) struct UniverseState {
+    version: tokio::sync::Mutex<Cell<u64>>,
+    devices: Vec<HardwareDeviceState>,
+
+    output_ports: HashMap<Address, Arc<tokio::sync::Mutex<Box<dyn OutputPort>>>>,
+
+    event_streams: HashMap<Address, Arc<tokio::sync::broadcast::Sender<AddressedEvent>>>,
 }
 
-pub(crate) struct DeviceState {
-    hardware_devices: Vec<Box<dyn HardwareDevice>>,
-    virtual_devices: HashMap<Address, Box<dyn VirtualDevice>>,
-    virtual_device_aliases: HashMap<String, Address>,
-    virtual_device_groups: HashMap<String, Vec<Address>>,
-    pub(crate) hardware_device_update_errors: VecDeque<TimestampedUpdateError>,
-
-    /// The checked, normalized configs used to create and map virtual devices.
-    ///
-    /// These represent the actual devices present in the state and system.
-    /// They are sorted by address.
-    pub(crate) virtual_device_configs: Vec<VirtualDeviceConfig>,
+impl Debug for UniverseState {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UniverseState")
+            .field("version", &self.version)
+            .field("devices", &self.devices)
+            .field(
+                "output_ports",
+                &self
+                    .output_ports
+                    .iter()
+                    .map(|(k, _)| k)
+                    .sorted()
+                    .collect::<Vec<_>>(),
+            )
+            .finish()
+    }
 }
 
-impl DeviceState {
-    pub(crate) fn update(&mut self) -> Result<()> {
-        // We want to make sure that we call update on all hardware devices, even if some of them
-        // fail to update.
-        let mut errs: Vec<(String, failure::Error)> = Vec::new();
-        for device in &self.hardware_devices {
-            match device.update() {
-                Ok(()) => {}
-                Err(f) => errs.push((device.alias(), f)),
-            };
+impl UniverseState {
+    pub(crate) async fn to_alloy_universe_config(&self) -> alloy::config::UniverseConfig {
+        let mut dev_configs = Vec::new();
+        for dev in self.devices.iter() {
+            dev_configs.push(dev.to_alloy_device_config().await)
+        }
+        alloy::config::UniverseConfig {
+            version: self.version.lock().await.get(),
+            devices: dev_configs,
+        }
+    }
+
+    pub(crate) async fn get_update_events_for_current_values(&self) -> Vec<AddressedEvent> {
+        let mut events = Vec::new();
+        for dev in self.devices.iter() {
+            for p in dev.input_ports.iter() {
+                if let Some(event) = p.port.get_update_event_for_current_value().await {
+                    events.push(event)
+                }
+            }
+            for p in dev.output_ports.iter() {
+                if let Some(event) = p.port.get_update_event_for_current_value().await {
+                    events.push(event)
+                }
+            }
         }
 
-        if !errs.is_empty() {
-            let ts = chrono::Utc::now();
+        events
+    }
+}
 
-            for (alias, err) in errs.iter() {
-                error!("unable to update hardware device {}: {:?}", alias, err)
+pub(crate) enum DeviceType {
+    DHT22(Box<dyn InputHardwareDevice>),
+    PCA9685(Box<dyn OutputHardwareDevice>),
+    DS18(Box<dyn InputHardwareDevice>),
+    MCP23017Input(Box<dyn InputHardwareDevice>),
+    MCP23017(Box<dyn OutputHardwareDevice>),
+    BME280(Box<dyn InputHardwareDevice>),
+    GPIO(Box<dyn InputHardwareDevice>),
+}
+
+impl Debug for DeviceType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.to_alloy_device_type())
+    }
+}
+
+impl DeviceType {
+    fn to_alloy_device_type(&self) -> alloy::config::DeviceType {
+        match self {
+            DeviceType::DHT22(_) => alloy::config::DeviceType::DHT22,
+            DeviceType::PCA9685(_) => alloy::config::DeviceType::PCA9685,
+            DeviceType::DS18(_) => alloy::config::DeviceType::DS18,
+            DeviceType::MCP23017Input(_) => alloy::config::DeviceType::MCP23017,
+            DeviceType::MCP23017(_) => alloy::config::DeviceType::MCP23017,
+            DeviceType::BME280(_) => alloy::config::DeviceType::BME280,
+            DeviceType::GPIO(_) => alloy::config::DeviceType::GPIO,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct HardwareDeviceState {
+    alias: String,
+    tags: HashSet<String>,
+    device_type: tokio::sync::Mutex<DeviceType>,
+
+    input_ports: Vec<InputPortState>,
+    output_ports: Vec<OutputPortState>,
+}
+
+impl HardwareDeviceState {
+    async fn to_alloy_device_config(&self) -> alloy::config::DeviceConfig {
+        alloy::config::DeviceConfig {
+            alias: self.alias.clone(),
+            device_type: self.device_type.lock().await.to_alloy_device_type(),
+            inputs: self
+                .input_ports
+                .iter()
+                .map(|p| p.to_alloy_port_config())
+                .collect(),
+            outputs: self
+                .output_ports
+                .iter()
+                .map(|p| p.to_alloy_port_config())
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct TimestampedInputValue {
+    ts: chrono::DateTime<chrono::Utc>,
+    value: std::result::Result<InputValue, String>,
+}
+
+#[derive(Debug)]
+pub(crate) struct PortState {
+    port: u8,
+    alias: String,
+    tags: HashSet<String>,
+    address: Address,
+    last_value: Mutex<Option<TimestampedInputValue>>,
+
+    value_metric: GenericGauge<AtomicF64>,
+    ok_metric: GenericGauge<AtomicF64>,
+    update_ok_counter: GenericCounter<AtomicI64>,
+    update_error_counter: GenericCounter<AtomicI64>,
+}
+
+impl PortState {
+    async fn update_last_value(
+        &self,
+        ts: chrono::DateTime<chrono::Utc>,
+        val: std::result::Result<InputValue, String>,
+    ) {
+        match &val {
+            Ok(v) => {
+                self.value_metric.set(match v {
+                    InputValue::Binary(b) => {
+                        if *b {
+                            1_f64
+                        } else {
+                            0_f64
+                        }
+                    }
+                    InputValue::Temperature(t) => *t,
+                    InputValue::Humidity(h) => *h,
+                    InputValue::Pressure(p) => *p,
+                    InputValue::Continuous(c) => *c as f64,
+                });
+                self.ok_metric.set(1_f64);
+                self.update_ok_counter.inc();
             }
+            Err(_) => {
+                self.ok_metric.set(0_f64);
+                self.update_error_counter.inc();
+            }
+        }
 
-            self.hardware_device_update_errors
-                .extend(errs.into_iter().map(|e| TimestampedUpdateError {
-                    alias: e.0,
-                    timestamp: ts.clone(),
-                    error: e.1,
-                }))
+        {
+            let mut v = self.last_value.lock().await;
+            *v = Some(TimestampedInputValue { ts, value: val })
+        }
+    }
+
+    async fn get_update_event_for_current_value(&self) -> Option<AddressedEvent> {
+        let v = self.last_value.lock().await;
+        v.clone().map(|v| AddressedEvent {
+            address: self.address,
+            event: Event {
+                timestamp: v.ts.clone(),
+                inner: v.value.map(|val| EventKind::Update { new_value: val }),
+            },
+        })
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct InputPortState {
+    port: Arc<PortState>,
+    value_type: InputValueType,
+}
+
+impl InputPortState {
+    fn to_alloy_port_config(&self) -> alloy::config::InputPortConfig {
+        alloy::config::InputPortConfig {
+            alias: self.port.alias.clone(),
+            input_type: self.value_type.clone(),
+            tags: self.port.tags.clone(),
+            port: self.port.port,
+            address: self.port.address,
+        }
+    }
+}
+
+pub(crate) struct OutputPortState {
+    port: Arc<PortState>,
+
+    dev: Arc<tokio::sync::Mutex<Box<dyn OutputPort>>>,
+}
+
+impl Debug for OutputPortState {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OutputPortState")
+            .field("port", &self.port)
+            .finish()
+    }
+}
+
+impl OutputPortState {
+    fn to_alloy_port_config(&self) -> alloy::config::OutputPortConfig {
+        alloy::config::OutputPortConfig {
+            alias: self.port.alias.clone(),
+            tags: self.port.tags.clone(),
+            port: self.port.port,
+            address: self.port.address,
+        }
+    }
+}
+
+impl UniverseState {
+    pub(crate) async fn update(&mut self) -> Result<()> {
+        for device in &self.devices {
+            let dev = device.device_type.lock().await;
+            match dev.deref() {
+                DeviceType::DHT22(_) => {}
+                DeviceType::DS18(_) => {}
+                DeviceType::MCP23017Input(_) => {}
+                DeviceType::BME280(_) => {}
+                DeviceType::GPIO(_) => {}
+                DeviceType::PCA9685(dev) => {
+                    if let Err(e) = dev.update() {
+                        error!("unable to update output device {}: {:?}", &device.alias, e)
+                    }
+                }
+                DeviceType::MCP23017(dev) => {
+                    if let Err(e) = dev.update() {
+                        error!("unable to update output device {}: {:?}", &device.alias, e)
+                    }
+                }
+            }
         }
 
         return Ok(());
     }
 
-    pub(crate) fn set_group(&mut self, group: &str, value: Value) -> Result<()> {
-        let addresses = self
-            .virtual_device_groups
-            .get(group.to_lowercase().as_str())
-            .ok_or_else(|| format_err!("invalid group: {}", group))?;
-
-        for address in addresses {
-            let d = self
-                .virtual_devices
-                .get(address)
-                .expect("invalid address for alias");
-
-            d.set(value).context(format!(
-                "unable to set value for device at address {}",
-                address
-            ))?;
-        }
-
-        Ok(())
-    }
-
-    pub(crate) fn set_alias(&mut self, alias: &str, value: Value) -> Result<()> {
-        let address = self
-            .virtual_device_aliases
-            .get(alias.to_lowercase().as_str())
-            .ok_or_else(|| format_err!("invalid alias: {}", alias))?;
+    pub(crate) async fn set_address(&mut self, address: Address, value: OutputValue) -> Result<()> {
         let d = self
-            .virtual_devices
-            .get(address)
-            .expect("invalid address for alias");
+            .output_ports
+            .get(&address)
+            .ok_or_else(|| format_err!("invalid address: {}", address))?;
 
-        d.set(value).context(format!(
+        d.lock().await.set(value).context(format!(
             "unable to set value for device at address {}",
             address
         ))?;
 
         Ok(())
-    }
-
-    pub(crate) fn set_address(&mut self, address: Address, value: Value) -> Result<()> {
-        let d = self
-            .virtual_devices
-            .get(&address)
-            .ok_or_else(|| format_err!("invalid address: {}", address))?;
-
-        d.set(value).context(format!(
-            "unable to set value for device at address {}",
-            address
-        ))?;
-
-        Ok(())
-    }
-
-    pub(crate) fn get_address(&self, address: Address) -> Result<Value> {
-        let d = self
-            .virtual_devices
-            .get(&address)
-            .ok_or_else(|| format_err!("invalid address: {}", address))?;
-
-        d.get()
     }
 }
 
-/// This is the result of mapping virtual devices to hardware devices.
-/// The first element are event streams.
-/// The second element are the actual mapped virtual devices
-/// The third element are alias->Address mappings.
-/// The last element are group->Vec<Address> mappings.
-type VirtualDeviceMapping = (
-    Vec<(Address, Pin<Box<dyn Stream<Item = Event> + Send>>)>,
-    HashMap<Address, Box<dyn VirtualDevice>>,
-    HashMap<String, Address>,
-    HashMap<String, Vec<Address>>,
-);
+impl UniverseState {
+    pub(crate) async fn from_config(cfg: &AggregatedConfig) -> Result<UniverseState> {
+        info!("creating universe state...");
+        let universe = Self::create_universe_state(cfg).await?;
+        debug!("created universe state {:?}", universe);
 
-impl DeviceState {
-    pub(crate) fn from_config(
-        cfg: &AggregatedConfig,
-    ) -> Result<(DeviceState, Vec<(u16, EventStream)>)> {
-        info!("creating hardware devices...");
-        let hardware_devices = Self::create_hardware_devices(cfg)?;
-
-        debug!("created hardware devices {:?}", hardware_devices.keys());
-        info!("created {} hardware devices", hardware_devices.len());
-
-        info!("creating virtual devices...");
-        // These will be checked and normalized by map_virtual_devices.
-        let mut virtual_device_configs = cfg.virtual_devices.clone();
-        let (event_streams, virtual_devices, virtual_device_aliases, virtual_device_groups) =
-            DeviceState::map_virtual_devices(&mut virtual_device_configs, &hardware_devices)?;
-        debug!(
-            "created virtual devices at addresses {:?}",
-            virtual_devices.keys()
-        );
-        debug!(
-            "created virtual devices with aliases {:?}",
-            virtual_device_aliases.keys()
-        );
-        debug!("created groups {:?}", virtual_device_groups.keys());
         info!(
-            "created {} virtual devices and {} groups",
-            virtual_devices.len(),
-            virtual_device_groups.len()
+            "created universe state with {} hardware devices and {} output ports",
+            universe.devices.len(),
+            universe.output_ports.len()
         );
-        virtual_device_configs.sort_unstable_by_key(|c| c.address);
 
-        Ok((
-            Self {
-                hardware_devices: hardware_devices.into_iter().map(|k| k.1).collect(),
-                virtual_devices,
-                virtual_device_aliases,
-                virtual_device_groups,
-                virtual_device_configs,
-                hardware_device_update_errors: Default::default(),
-            },
-            event_streams,
-        ))
+        Ok(universe)
     }
 
-    fn create_hardware_devices(
-        cfg: &AggregatedConfig,
-    ) -> Result<HashMap<String, Box<dyn HardwareDevice>>> {
-        let mut hardware_devices: HashMap<String, Box<dyn HardwareDevice>> = HashMap::new();
+    pub(crate) fn get_event_stream(
+        &self,
+        addr: Address,
+    ) -> Result<tokio::sync::broadcast::Receiver<AddressedEvent>> {
+        let sender = self
+            .event_streams
+            .get(&addr)
+            .ok_or(err_msg("invalid address"))?;
+        Ok(sender.subscribe())
+    }
+
+    async fn create_universe_state(cfg: &AggregatedConfig) -> Result<UniverseState> {
+        let mut aliases = HashSet::new();
         let mut synchronized_pca9685s: HashMap<
             String,
             Vec<(SynchronizedDeviceRWCore, PCA9685Config, String)>,
         > = HashMap::new();
-        for device_config in &cfg.devices {
-            match device_config {
-                config::DeviceConfig::PCA9685 { alias, config: cfg } => {
-                    debug!("creating PCA9685 {}...", alias);
-                    let alias = alias.to_lowercase();
-                    debug!("normalized alias to {}", alias);
-                    ensure!(
-                        !hardware_devices.contains_key(&alias),
-                        "duplicate alias: {}",
-                        alias
-                    );
-                    let dev = if cfg.i2c_bus == "" {
-                        warn!("using I2C mock");
-                        let i2c = i2c_mock::I2cMock::new();
-                        pca9685::PCA9685::new(i2c, &cfg, alias.clone())?
-                    } else {
-                        debug!("using I2C at {}", cfg.i2c_bus);
-                        let i2c = linux_hal::I2cdev::new(cfg.i2c_bus.clone())?;
-                        pca9685::PCA9685::new(i2c, &cfg, alias.clone())?
-                    };
-                    hardware_devices.insert(alias.clone(), Box::new(dev));
-                }
-                config::DeviceConfig::PCA9685Synchronized { alias, config: cfg } => {
-                    debug!("creating synchronized PCA9685 {}...", alias);
-                    let alias = alias.to_lowercase();
-                    debug!("normalized alias to {}", alias);
-                    ensure!(
-                        !hardware_devices.contains_key(&alias),
-                        "duplicate alias: {}",
-                        alias
-                    );
-                    let i2c_bus = cfg.i2c_bus.to_lowercase();
-                    debug!("normalized I2C bus to {}", i2c_bus);
+        let mut address_counter = 1;
+        let mut devices = Vec::new();
+        let mut addressed_output_ports = HashMap::new();
+        let mut event_broadcasters = HashMap::new();
 
-                    let core = Arc::new(Mutex::new(DeviceRWCore::new_dirty(
-                        alias.clone(),
-                        16,
-                        ValueScaling::Logarithmic,
-                    )));
-                    synchronized_pca9685s.entry(i2c_bus).or_default().push((
-                        core.clone(),
-                        cfg.clone(),
-                        alias.clone(),
-                    ));
+        for device_config in cfg.devices.clone() {
+            debug!("creating device {}...", device_config.alias);
+            let device_alias = device_config.alias.to_lowercase();
+            debug!("normalized alias to {}", device_alias);
+            ensure!(
+                !aliases.contains(&device_alias),
+                "duplicate alias: {}",
+                device_alias
+            );
+            aliases.insert(device_alias.clone());
+            let dev = UniverseState::create_device_type(
+                &mut synchronized_pca9685s,
+                &device_config,
+                device_alias.clone(),
+            )
+            .context(format!("unable to create device {}", device_alias))?;
+            let mut input_ports = Vec::new();
+            let mut output_ports = Vec::new();
 
-                    hardware_devices.insert(alias.clone(), Box::new(core));
-                }
-                DeviceConfig::DS18 { alias, config: cfg } => {
-                    debug!("creating DS18 {}...", alias);
-                    let alias = alias.to_lowercase();
-                    debug!("normalized alias to {}", alias);
-                    ensure!(
-                        !hardware_devices.contains_key(&alias),
-                        "duplicate alias: {}",
-                        alias
-                    );
-                    let dev = DS18::new(alias.clone(), cfg)?;
-                    hardware_devices.insert(alias.clone(), Box::new(dev));
-                }
-                DeviceConfig::MCP23017 { alias, config: cfg } => {
-                    debug!("creating MCP23017 {}...", alias);
-                    let alias = alias.to_lowercase();
-                    debug!("normalized alias to {}", alias);
-                    ensure!(
-                        !hardware_devices.contains_key(&alias),
-                        "duplicate alias: {}",
-                        alias
-                    );
-                    let dev = if cfg.i2c_bus == "" {
-                        warn!("using I2C mock");
-                        let i2c = i2c_mock::I2cMock::new();
-                        mcp23017::MCP23017::new(i2c, &cfg, alias.clone())?
-                    } else {
-                        debug!("using I2C at {}", cfg.i2c_bus);
-                        let i2c = linux_hal::I2cdev::new(cfg.i2c_bus.clone())?;
-                        mcp23017::MCP23017::new(i2c, &cfg, alias.clone())?
-                    };
-                    hardware_devices.insert(alias.clone(), Box::new(dev));
-                }
-                DeviceConfig::MCP23017Input { alias, config: cfg } => {
-                    debug!("creating MCP23017Input {}...", alias);
-                    let alias = alias.to_lowercase();
-                    debug!("normalized alias to {}", alias);
-                    ensure!(
-                        !hardware_devices.contains_key(&alias),
-                        "duplicate alias: {}",
-                        alias
-                    );
-                    let dev = if cfg.i2c_bus == "" {
-                        warn!("using I2C mock");
-                        let i2c = i2c_mock::I2cMock::new();
-                        mcp23017_input::MCP23017Input::new(i2c, &cfg, alias.clone())?
-                    } else {
-                        debug!("using I2C at {}", cfg.i2c_bus);
-                        let i2c = linux_hal::I2cdev::new(cfg.i2c_bus.clone())?;
-                        mcp23017_input::MCP23017Input::new(i2c, &cfg, alias.clone())?
-                    };
-                    hardware_devices.insert(alias.clone(), Box::new(dev));
-                }
-                DeviceConfig::BME280 { alias, config: cfg } => {
-                    debug!("creating BME280 {}...", alias);
-                    let alias = alias.to_lowercase();
-                    debug!("normalized alias to {}", alias);
-                    ensure!(
-                        !hardware_devices.contains_key(&alias),
-                        "duplicate alias: {}",
-                        alias
-                    );
-                    let dev = if cfg.i2c_bus == "" {
-                        warn!("using I2C mock");
-                        let i2c = i2c_mock::I2cMock::new();
-                        crate::bme280::BME280::new(i2c, &cfg, alias.clone())?
-                    } else {
-                        debug!("using I2C at {}", cfg.i2c_bus);
-                        let i2c = linux_hal::I2cdev::new(cfg.i2c_bus.clone())?;
-                        crate::bme280::BME280::new(i2c, &cfg, alias.clone())?
-                    };
-                    hardware_devices.insert(alias.clone(), Box::new(dev));
-                }
-                DeviceConfig::DHT22 { alias, config } => {
-                    debug!("creating DHT22 {}...", alias);
-                    let alias = alias.to_lowercase();
-                    debug!("normalized alias to {}", alias);
-                    ensure!(
-                        !hardware_devices.contains_key(&alias),
-                        "duplicate alias: {}",
-                        alias
-                    );
-                    let dev =
-                        DHT22::new(alias.clone(), &config).context("unable to create DHT22")?;
-                    hardware_devices.insert(alias.clone(), Box::new(dev));
-                }
-                DeviceConfig::GPIO { alias, config } => {
-                    debug!("creating GPIO {}...", alias);
-                    let alias = alias.to_lowercase();
-                    debug!("normalized alias to {}", alias);
-                    ensure!(
-                        !hardware_devices.contains_key(&alias),
-                        "duplicate alias: {}",
-                        alias
-                    );
-                    let dev = GPIO::new(alias.clone(), &config).context("unable to create GPIO")?;
-                    hardware_devices.insert(alias.clone(), Box::new(dev));
+            match &dev {
+                DeviceType::DHT22(input_dev)
+                | DeviceType::DS18(input_dev)
+                | DeviceType::MCP23017Input(input_dev)
+                | DeviceType::BME280(input_dev)
+                | DeviceType::GPIO(input_dev) => UniverseState::create_input_port_mappings(
+                    &mut aliases,
+                    &mut address_counter,
+                    &mut event_broadcasters,
+                    &device_config,
+                    &device_alias,
+                    &mut input_ports,
+                    input_dev,
+                )
+                .await
+                .context("unable to map input ports")?,
+                DeviceType::MCP23017(output_dev) | DeviceType::PCA9685(output_dev) => {
+                    UniverseState::create_output_port_mappings(
+                        &mut aliases,
+                        &mut address_counter,
+                        &mut addressed_output_ports,
+                        &mut event_broadcasters,
+                        &device_config,
+                        &device_alias,
+                        &mut output_ports,
+                        output_dev,
+                    )
+                    .await
+                    .context("unable to map output ports")?
                 }
             }
+
+            let state = HardwareDeviceState {
+                alias: device_alias,
+                tags: device_config.tags.unwrap_or_default(),
+                device_type: tokio::sync::Mutex::new(dev),
+                input_ports,
+                output_ports,
+            };
+
+            devices.push(state);
         }
 
         if !synchronized_pca9685s.is_empty() {
@@ -391,7 +438,396 @@ impl DeviceState {
             Self::synchronize_pcas(synchronized_pca9685s)?;
         }
 
-        Ok(hardware_devices)
+        Ok(UniverseState {
+            version: tokio::sync::Mutex::new(Cell::new(1)),
+            devices,
+            output_ports: addressed_output_ports,
+            event_streams: event_broadcasters,
+        })
+    }
+
+    async fn create_output_port_mappings(
+        aliases: &mut HashSet<String>,
+        address_counter: &mut u16,
+        addressed_output_ports: &mut HashMap<Address, Arc<tokio::sync::Mutex<Box<dyn OutputPort>>>>,
+        event_broadcasters: &mut HashMap<
+            Address,
+            Arc<tokio::sync::broadcast::Sender<AddressedEvent>>,
+        >,
+        device_config: &DeviceConfig,
+        device_alias: &String,
+        output_ports: &mut Vec<OutputPortState>,
+        output_dev: &Box<dyn OutputHardwareDevice>,
+    ) -> Result<()> {
+        Self::ensure_no_input_port_mappings_configured(&device_config, &device_alias)?;
+
+        for port_config in device_config.outputs.clone().unwrap_or_else(|| {
+            warn!(
+                "output device {} has no output port mappings configured",
+                &device_alias
+            );
+            Vec::new()
+        }) {
+            let generic_port_alias = output_dev
+                .port_alias(port_config.base.port)
+                .context("unable to generate port alias")?;
+            let port_alias = UniverseState::generate_port_alias(
+                aliases,
+                device_alias,
+                &port_config.base,
+                generic_port_alias,
+            )?;
+
+            let (output_port, event_stream) = output_dev
+                .get_output_port(port_config.base.port, port_config.scaling.clone())
+                .context(format!(
+                    "unable to map input port {}:{}",
+                    device_alias, port_config.base.port,
+                ))?;
+            let address = *address_counter;
+
+            // Set default value
+            if let Some(default_value) = port_config.default {
+                output_port
+                    .set(default_value)
+                    .context("unable to set default value")?;
+            }
+
+            let mut port = PortState {
+                port: port_config.base.port,
+                alias: port_alias.clone(),
+                tags: port_config.base.tags.unwrap_or_default(),
+                address,
+                last_value: Mutex::new(None),
+                value_metric: prom::CONTINUOUS.with_label_values(&[port_alias.as_str()]),
+                ok_metric: prom::VALUE_OK.with_label_values(&[port_alias.as_str()]),
+                update_ok_counter: prom::VALUE_UPDATES
+                    .with_label_values(&[port_alias.as_str(), "ok"]),
+                update_error_counter: prom::VALUE_UPDATES
+                    .with_label_values(&[port_alias.as_str(), "error"]),
+            };
+            port.tags
+                .extend(device_config.tags.clone().unwrap_or_default().into_iter());
+
+            let port = Arc::new(port);
+            let port_2 = port.clone();
+
+            let (event_broadcast_sender, _) = tokio::sync::broadcast::channel(100);
+            let event_broadcast_sender = Arc::new(event_broadcast_sender);
+            let broadcast_sender_2 = event_broadcast_sender.clone();
+
+            UniverseState::spawn_event_to_broadcast_worker(
+                event_stream,
+                port_2,
+                broadcast_sender_2,
+                address,
+            );
+
+            let output_port_state = OutputPortState {
+                port,
+                dev: Arc::new(tokio::sync::Mutex::new(output_port)),
+            };
+
+            addressed_output_ports.insert(address, output_port_state.dev.clone());
+            event_broadcasters.insert(address, event_broadcast_sender);
+            *address_counter += 1;
+            output_ports.push(output_port_state);
+        }
+        Ok(())
+    }
+
+    fn spawn_event_to_broadcast_worker(
+        mut event_stream: EventStream,
+        port: Arc<PortState>,
+        broadcast_sender: Arc<Sender<AddressedEvent>>,
+        address: u16,
+    ) {
+        tokio::spawn(async move {
+            debug!(
+                "starting event consumer -> broadcaster for address {}",
+                address
+            );
+            while let Some(event) = event_stream.next().await {
+                // Update port value
+                match event.inner.clone() {
+                    Ok(ek) => {
+                        if let alloy::event::EventKind::Update { new_value } = ek {
+                            port.update_last_value(event.timestamp.clone(), Ok(new_value))
+                                .await
+                        }
+                    }
+                    Err(err) => {
+                        port.update_last_value(event.timestamp.clone(), Err(err))
+                            .await
+                    }
+                }
+
+                // Push into broadcast channel
+                // We ignore a potential error, because they can happen if there are no receivers
+                // at the moment. We can create more receivers though, so we just ignore it.
+                let _ = broadcast_sender.send(AddressedEvent { address, event });
+            }
+        });
+    }
+
+    fn generate_port_alias(
+        aliases: &mut HashSet<String>,
+        device_alias: &String,
+        port_config: &BaseMappingConfig,
+        generic_port_alias: String,
+    ) -> Result<String> {
+        let port_alias = port_config
+            .alias
+            .clone()
+            .unwrap_or_else(|| {
+                warn!(
+                    "no alias given for port {}:{}, using device-specific port alias {}-{}",
+                    device_alias, port_config.port, device_alias, generic_port_alias
+                );
+                format!("{}-{}", device_alias, generic_port_alias)
+            })
+            .to_lowercase();
+        debug!(
+            "creating port {}:{}, alias {}...",
+            device_alias, port_config.port, port_alias
+        );
+        ensure!(
+            !aliases.contains(&port_alias),
+            "duplicate alias: {}",
+            port_alias
+        );
+        aliases.insert(port_alias.clone());
+        Ok(port_alias)
+    }
+
+    async fn create_input_port_mappings(
+        aliases: &mut HashSet<String>,
+        address_counter: &mut u16,
+        event_broadcasters: &mut HashMap<
+            Address,
+            Arc<tokio::sync::broadcast::Sender<AddressedEvent>>,
+        >,
+        device_config: &DeviceConfig,
+        device_alias: &String,
+        input_ports: &mut Vec<InputPortState>,
+        input_dev: &Box<dyn InputHardwareDevice>,
+    ) -> Result<()> {
+        Self::ensure_no_output_port_mappings_configured(&device_config, &device_alias)?;
+
+        for port_config in device_config.inputs.clone().unwrap_or_else(|| {
+            warn!(
+                "input device {} has no input port mappings configured",
+                &device_alias
+            );
+            Vec::new()
+        }) {
+            let generic_port_alias = input_dev
+                .port_alias(port_config.base.port)
+                .context("unable to generate port alias")?;
+            let port_alias = UniverseState::generate_port_alias(
+                aliases,
+                device_alias,
+                &port_config.base,
+                generic_port_alias,
+            )?;
+
+            let (value_type, event_stream) = input_dev
+                .get_input_port(port_config.base.port)
+                .context(format!(
+                    "unable to map input port {}:{}",
+                    device_alias, port_config.base.port
+                ))?;
+            let address = *address_counter;
+
+            let mut port = PortState {
+                port: port_config.base.port,
+                alias: port_alias.clone(),
+                tags: port_config.base.tags.unwrap_or_default(),
+                address,
+                last_value: Mutex::new(None),
+                value_metric: match value_type {
+                    InputValueType::Binary => {
+                        prom::BINARY.with_label_values(&[port_alias.as_str()])
+                    }
+                    InputValueType::Temperature => {
+                        prom::TEMPERATURE.with_label_values(&[port_alias.as_str()])
+                    }
+                    InputValueType::Humidity => {
+                        prom::HUMIDITY.with_label_values(&[port_alias.as_str()])
+                    }
+                    InputValueType::Pressure => {
+                        prom::PRESSURE.with_label_values(&[port_alias.as_str()])
+                    }
+                    InputValueType::Continuous => {
+                        prom::CONTINUOUS.with_label_values(&[port_alias.as_str()])
+                    }
+                },
+                ok_metric: prom::VALUE_OK.with_label_values(&[port_alias.as_str()]),
+                update_ok_counter: prom::VALUE_UPDATES
+                    .with_label_values(&[port_alias.as_str(), "ok"]),
+                update_error_counter: prom::VALUE_UPDATES
+                    .with_label_values(&[port_alias.as_str(), "error"]),
+            };
+            port.tags
+                .extend(device_config.tags.clone().unwrap_or_default().into_iter());
+
+            let port = Arc::new(port);
+            let port_2 = port.clone();
+
+            let (event_broadcast_sender, _) = tokio::sync::broadcast::channel(100);
+            let event_broadcast_sender = Arc::new(event_broadcast_sender);
+            let broadcast_sender_2 = event_broadcast_sender.clone();
+
+            UniverseState::spawn_event_to_broadcast_worker(
+                event_stream,
+                port_2,
+                broadcast_sender_2,
+                address,
+            );
+
+            let port = InputPortState { port, value_type };
+
+            *address_counter += 1;
+            event_broadcasters.insert(address, event_broadcast_sender);
+            input_ports.push(port);
+        }
+
+        Ok(())
+    }
+
+    fn ensure_no_output_port_mappings_configured(
+        device_config: &DeviceConfig,
+        alias: &str,
+    ) -> Result<()> {
+        ensure!(
+            device_config
+                .outputs
+                .as_ref()
+                .map_or_else(|| true, |cfgs| cfgs.is_empty()),
+            "{} is an input device but output port mappings were supplied",
+            alias
+        );
+        Ok(())
+    }
+
+    fn ensure_no_input_port_mappings_configured(
+        device_config: &DeviceConfig,
+        alias: &str,
+    ) -> Result<()> {
+        ensure!(
+            device_config
+                .inputs
+                .as_ref()
+                .map_or_else(|| true, |cfgs| cfgs.is_empty()),
+            "{} is an output device but input port mappings were supplied",
+            alias
+        );
+        Ok(())
+    }
+
+    fn create_device_type(
+        synchronized_pca9685s: &mut HashMap<
+            String,
+            Vec<(SynchronizedDeviceRWCore, PCA9685Config, String)>,
+        >,
+        device_config: &DeviceConfig,
+        alias: String,
+    ) -> Result<DeviceType> {
+        let dev = match &device_config.hardware_device_config {
+            config::HardwareDeviceConfig::PCA9685 { config: cfg } => {
+                debug!("creating PCA9685 {}...", alias);
+                let dev = if cfg.i2c_bus == "" {
+                    warn!("using I2C mock");
+                    let i2c = i2c_mock::I2cMock::new();
+                    pca9685::PCA9685::new(i2c, &cfg, alias.clone())?
+                } else {
+                    debug!("using I2C at {}", cfg.i2c_bus);
+                    let i2c = linux_hal::I2cdev::new(cfg.i2c_bus.clone())?;
+                    pca9685::PCA9685::new(i2c, &cfg, alias.clone())?
+                };
+                DeviceType::PCA9685(Box::new(dev))
+            }
+            config::HardwareDeviceConfig::PCA9685Synchronized { config: cfg } => {
+                debug!("creating synchronized PCA9685 {}...", alias);
+                let i2c_bus = cfg.i2c_bus.to_lowercase();
+                debug!("normalized I2C bus to {}", i2c_bus);
+
+                let core = SynchronizedDeviceRWCore::new_from_core(DeviceRWCore::new_dirty(
+                    alias.clone(),
+                    16,
+                    ValueScaling::Logarithmic,
+                ));
+                synchronized_pca9685s.entry(i2c_bus).or_default().push((
+                    core.clone(),
+                    cfg.clone(),
+                    alias.clone(),
+                ));
+
+                DeviceType::PCA9685(Box::new(core))
+            }
+            config::HardwareDeviceConfig::DS18 { config: cfg } => {
+                debug!("creating DS18 {}...", alias);
+
+                let dev = DS18::new(alias.clone(), cfg)?;
+                DeviceType::DS18(Box::new(dev))
+            }
+            config::HardwareDeviceConfig::MCP23017 { config: cfg } => {
+                debug!("creating MCP23017 {}...", alias);
+
+                let dev = if cfg.i2c_bus == "" {
+                    warn!("using I2C mock");
+                    let i2c = i2c_mock::I2cMock::new();
+                    mcp23017::MCP23017::new(i2c, &cfg, alias.clone())?
+                } else {
+                    debug!("using I2C at {}", cfg.i2c_bus);
+                    let i2c = linux_hal::I2cdev::new(cfg.i2c_bus.clone())?;
+                    mcp23017::MCP23017::new(i2c, &cfg, alias.clone())?
+                };
+                DeviceType::MCP23017(Box::new(dev))
+            }
+            config::HardwareDeviceConfig::MCP23017Input { config: cfg } => {
+                debug!("creating MCP23017Input {}...", alias);
+
+                let dev = if cfg.i2c_bus == "" {
+                    warn!("using I2C mock");
+                    let i2c = i2c_mock::I2cMock::new();
+                    mcp23017_input::MCP23017Input::new(i2c, &cfg, alias.clone())?
+                } else {
+                    debug!("using I2C at {}", cfg.i2c_bus);
+                    let i2c = linux_hal::I2cdev::new(cfg.i2c_bus.clone())?;
+                    mcp23017_input::MCP23017Input::new(i2c, &cfg, alias.clone())?
+                };
+                DeviceType::MCP23017Input(Box::new(dev))
+            }
+            config::HardwareDeviceConfig::BME280 { config: cfg } => {
+                debug!("creating BME280 {}...", alias);
+
+                let dev = if cfg.i2c_bus == "" {
+                    warn!("using I2C mock");
+                    let i2c = i2c_mock::I2cMock::new();
+                    crate::bme280::BME280::new(i2c, &cfg, alias.clone())?
+                } else {
+                    debug!("using I2C at {}", cfg.i2c_bus);
+                    let i2c = linux_hal::I2cdev::new(cfg.i2c_bus.clone())?;
+                    crate::bme280::BME280::new(i2c, &cfg, alias.clone())?
+                };
+                DeviceType::BME280(Box::new(dev))
+            }
+            config::HardwareDeviceConfig::DHT22 { config } => {
+                debug!("creating DHT22 {}...", alias);
+
+                let dev = DHT22::new(alias.clone(), &config).context("unable to create DHT22")?;
+                DeviceType::DHT22(Box::new(dev))
+            }
+            config::HardwareDeviceConfig::GPIO { config } => {
+                debug!("creating GPIO {}...", alias);
+
+                let dev = GPIO::new(alias.clone(), &config).context("unable to create GPIO")?;
+                DeviceType::GPIO(Box::new(dev))
+            }
+        };
+
+        Ok(dev)
     }
 
     fn synchronize_pcas(
@@ -452,80 +888,5 @@ impl DeviceState {
         }
 
         Ok(())
-    }
-
-    fn map_virtual_devices(
-        configs: &mut Vec<VirtualDeviceConfig>,
-        hardware_devices: &HashMap<String, Box<dyn HardwareDevice>>,
-    ) -> Result<VirtualDeviceMapping> {
-        let mut event_streams = Vec::new();
-        let mut virtual_devices: HashMap<Address, Box<dyn VirtualDevice>> = HashMap::new();
-        let mut virtual_device_aliases: HashMap<String, Address> = HashMap::new();
-        let mut virtual_device_groups: HashMap<String, Vec<Address>> = HashMap::new();
-
-        for cfg in configs.iter_mut() {
-            debug!(
-                "creating virtual device {} at address {}, mapped at {}:{} with scaling {:?}",
-                cfg.alias, cfg.address, cfg.mapping.device, cfg.mapping.port, cfg.mapping.scaling
-            );
-
-            cfg.alias = cfg.alias.to_lowercase();
-            debug!("normalized alias to {}", cfg.alias);
-            cfg.mapping = MappingConfig {
-                device: cfg.mapping.device.to_lowercase(),
-                port: cfg.mapping.port,
-                scaling: cfg.mapping.scaling.clone(),
-            };
-            debug!("normalized mapping to {:?}", cfg.mapping);
-            cfg.groups = cfg.groups.iter().map(|x| x.to_lowercase()).collect_vec();
-            debug!("normalized groups to {:?}", cfg.groups);
-            ensure!(
-                !virtual_device_aliases.contains_key(&cfg.alias),
-                "duplicate alias {} for virtual device at address {}",
-                cfg.alias,
-                cfg.address
-            );
-            ensure!(
-                !virtual_devices.contains_key(&cfg.address),
-                "duplicate address {} for virtual device {}",
-                cfg.address,
-                cfg.alias
-            );
-            let has_duplicates =
-                (1..cfg.groups.len()).any(|i| cfg.groups[i..].contains(&cfg.groups[i - 1]));
-            ensure!(
-                !has_duplicates,
-                "duplicate group for virtual device {}",
-                cfg.alias
-            );
-
-            let hw_dev = hardware_devices.get(&cfg.mapping.device).ok_or_else(|| {
-                format_err!(
-                    "unknown hardware device {} for virtual device {}",
-                    cfg.mapping.device,
-                    cfg.alias
-                )
-            })?;
-            let (vdev, stream) = hw_dev
-                .get_virtual_device(cfg.mapping.port, cfg.mapping.scaling.clone())
-                .context(format!(
-                    "unable to create virtual device at mapping {}:{}",
-                    cfg.mapping.device, cfg.mapping.port
-                ))?;
-
-            virtual_devices.insert(cfg.address, vdev);
-            virtual_device_aliases.insert(cfg.alias.clone(), cfg.address);
-            for g in cfg.groups.clone() {
-                let group = virtual_device_groups.entry(g).or_default();
-                group.push(cfg.address);
-            }
-            event_streams.push((cfg.address, stream));
-        }
-        Ok((
-            event_streams,
-            virtual_devices,
-            virtual_device_aliases,
-            virtual_device_groups,
-        ))
     }
 }

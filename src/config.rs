@@ -1,5 +1,6 @@
 use crate::bme280::BME280Config;
 use crate::dht22::DHT22Config;
+use crate::dht22_expander::DHT22ExpanderConfig;
 use crate::ds18::DS18Config;
 use crate::gpio::GPIOConfig;
 use crate::mcp23017::MCP23017Config;
@@ -206,6 +207,8 @@ pub(crate) enum HardwareDeviceConfig {
     MCP23017Input { config: MCP23017InputConfig },
     #[serde(rename = "dht22")]
     DHT22 { config: DHT22Config },
+    #[serde(rename = "dht22_expander")]
+    DHT22Expander { config: DHT22ExpanderConfig },
     #[serde(rename = "gpio")]
     GPIO { config: GPIOConfig },
 }

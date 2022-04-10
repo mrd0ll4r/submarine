@@ -22,6 +22,7 @@ mod config;
 mod device;
 mod device_core;
 mod dht22;
+mod dht22_expander;
 mod dht22_lib;
 mod ds18;
 mod gpio;

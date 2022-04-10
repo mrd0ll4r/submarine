@@ -60,6 +60,12 @@ lazy_static! {
         &["alias", "result"]
     )
     .unwrap();
+    pub static ref DHT22_EXPANDER_READOUTS: IntCounterVec = register_int_counter_vec!(
+        "dht22_expander_readouts",
+        "counts readouts for DHT22-to-I2C expanders by alias and result",
+        &["alias", "result"]
+    )
+    .unwrap();
     pub static ref DS18_MEASUREMENTS: IntCounterVec = register_int_counter_vec!(
         "ds18_measurements",
         "counts measurements for DS18 sensors by alias and result",

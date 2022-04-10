@@ -1,4 +1,6 @@
-use crate::config::{AggregatedConfig, BaseMappingConfig, DeviceConfig, ValueScaling};
+use crate::config::{
+    AggregatedConfig, BaseMappingConfig, DeviceConfig, HardwareDeviceConfig, ValueScaling,
+};
 use crate::device_core::{DeviceRWCore, SynchronizedDeviceRWCore};
 use crate::dht22::DHT22;
 use crate::ds18::DS18;
@@ -125,6 +127,7 @@ impl UniverseState {
 
 pub(crate) enum DeviceType {
     DHT22(Box<dyn InputHardwareDevice>),
+    DHT22Expander(Box<dyn InputHardwareDevice>),
     PCA9685(Box<dyn OutputHardwareDevice>),
     DS18(Box<dyn InputHardwareDevice>),
     MCP23017Input(Box<dyn InputHardwareDevice>),
@@ -143,6 +146,7 @@ impl DeviceType {
     fn to_alloy_device_type(&self) -> alloy::config::DeviceType {
         match self {
             DeviceType::DHT22(_) => alloy::config::DeviceType::DHT22,
+            DeviceType::DHT22Expander(_) => alloy::config::DeviceType::DHT22Expander,
             DeviceType::PCA9685(_) => alloy::config::DeviceType::PCA9685,
             DeviceType::DS18(_) => alloy::config::DeviceType::DS18,
             DeviceType::MCP23017Input(_) => alloy::config::DeviceType::MCP23017,
@@ -298,11 +302,12 @@ impl UniverseState {
         for device in &self.devices {
             let dev = device.device_type.lock().await;
             match dev.deref() {
-                DeviceType::DHT22(_) => {}
-                DeviceType::DS18(_) => {}
-                DeviceType::MCP23017Input(_) => {}
-                DeviceType::BME280(_) => {}
-                DeviceType::GPIO(_) => {}
+                DeviceType::DHT22(_)
+                | DeviceType::DHT22Expander(_)
+                | DeviceType::DS18(_)
+                | DeviceType::MCP23017Input(_)
+                | DeviceType::BME280(_)
+                | DeviceType::GPIO(_) => {}
                 DeviceType::PCA9685(dev) => {
                     if let Err(e) = dev.update() {
                         error!("unable to update output device {}: {:?}", &device.alias, e)
@@ -392,6 +397,7 @@ impl UniverseState {
 
             match &dev {
                 DeviceType::DHT22(input_dev)
+                | DeviceType::DHT22Expander(input_dev)
                 | DeviceType::DS18(input_dev)
                 | DeviceType::MCP23017Input(input_dev)
                 | DeviceType::BME280(input_dev)
@@ -824,6 +830,20 @@ impl UniverseState {
 
                 let dev = GPIO::new(alias.clone(), &config).context("unable to create GPIO")?;
                 DeviceType::GPIO(Box::new(dev))
+            }
+            HardwareDeviceConfig::DHT22Expander { config } => {
+                debug!("creating DHT22Expander {}...", alias);
+
+                let dev = if config.i2c_bus == "" {
+                    warn!("using I2C mock");
+                    let i2c = i2c_mock::I2cMock::new();
+                    crate::dht22_expander::DHT22Expander::new(i2c, alias.clone(), &config)?
+                } else {
+                    debug!("using I2C at {}", config.i2c_bus);
+                    let i2c = linux_hal::I2cdev::new(config.i2c_bus.clone())?;
+                    crate::dht22_expander::DHT22Expander::new(i2c, alias.clone(), &config)?
+                };
+                DeviceType::DHT22Expander(Box::new(dev))
             }
         };
 

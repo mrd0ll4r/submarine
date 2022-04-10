@@ -167,6 +167,9 @@ impl PCA9685 {
             // Do the actual update
             let res =
                 Self::handle_update_async_inner_outer(&values, scalings, dirty, &mut dev, &hist);
+            if let Err(ref e) = res {
+                warn!("{}: unable to update PCA: {:?}", alias, e)
+            }
 
             sleep_duration =
                 poll::poll_loop_end(module_path!(), res, &core, values, wake_up, update_interval);

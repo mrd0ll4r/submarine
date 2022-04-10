@@ -18,32 +18,29 @@
 //! This library has been tested on various DHT22s using a Raspberry Pi 4 Module B+ on both ARMv7
 //! and AARCH64.
 
-use std::ptr::read_volatile;
-use std::ptr::write_volatile;
-
-use std::thread::sleep;
-use std::time::{Duration, Instant};
-
-use rppal::gpio::{IoPin, Level, Mode, PullUpDown};
-
 use itertools::Itertools;
 use libc::sched_param;
 use libc::sched_setscheduler;
 use libc::SCHED_FIFO;
 use libc::SCHED_OTHER;
+use rppal::gpio::{IoPin, Level, Mode, PullUpDown};
 use std::cmp;
+use std::ptr::read_volatile;
+use std::ptr::write_volatile;
+use std::thread::sleep;
+use std::time::{Duration, Instant};
 
-/// A temperature and humidity reading from the DHT22.
-#[derive(Debug)]
+/// A temperature and humidity reading from a DHT22 sensor.
+#[derive(Debug, Copy, Clone)]
 pub struct Reading {
     pub temperature: f32,
     pub humidity: f32,
 }
 
-/// Errors that may occur when reading temperature.
+/// Errors that may occur when reading a sensor.
 #[derive(Debug)]
 pub enum ReadingError {
-    /// Occurs if a timeout occured reading the pin.
+    /// Occurs if a timeout occurred reading the pin.
     Timeout,
 
     /// Occurs if the checksum value from the DHT22 is incorrect.
@@ -119,15 +116,12 @@ fn decode(arr: [usize; DHT_PULSES * 2]) -> Result<Reading, ReadingError> {
         i += 2;
     }
 
-    let checksum = data[0]
-        .wrapping_add(data[1])
-        .wrapping_add(data[2])
-        .wrapping_add(data[3]);
+    let checksum = compute_checksum(data[0], data[1], data[2], data[3]);
     debug!(
         "threshold (50µs) = {}, checksum is {:#010b}, expected {:#010b}, match={}",
         threshold,
-        checksum,
         data[4],
+        checksum,
         checksum == data[4]
     );
 
@@ -135,27 +129,37 @@ fn decode(arr: [usize; DHT_PULSES * 2]) -> Result<Reading, ReadingError> {
         return Result::Err(ReadingError::Checksum);
     }
 
-    let h_dec = data[0] as u16 * 256 + data[1] as u16;
+    let reading = decode_reading(data[0], data[1], data[2], data[3]);
+
+    Result::Ok(reading)
+}
+
+pub(crate) fn compute_checksum(d0: u8, d1: u8, d2: u8, d3: u8) -> u8 {
+    d0.wrapping_add(d1).wrapping_add(d2).wrapping_add(d3)
+}
+
+pub(crate) fn decode_reading(d0: u8, d1: u8, d2: u8, d3: u8) -> Reading {
+    let h_dec = d0 as u16 * 256 + d1 as u16;
     let h = h_dec as f32 / 10.0f32;
 
-    let t_dec = (data[2] & 0x7f) as u16 * 256 + data[3] as u16;
-    let mut t = t_dec as f32 / 10.0f32;
-    if (data[2] & 0x80) != 0 {
-        t *= -1.0f32;
+    let t_dec = (d2 & 0x7f) as u16 * 256 + d3 as u16;
+    let mut t = t_dec as f32 / 10_f32;
+    if (d2 & 0x80) != 0 {
+        t *= -1_f32;
     }
 
-    Result::Ok(Reading {
+    Reading {
         temperature: t,
         humidity: h,
-    })
+    }
 }
 
 /// Read temperature and humidity from a DHT22 connected to a Gpio pin on a Raspberry Pi.
 ///
 /// On a Raspberry Pi this is implemented using bit-banging which is very error-prone.  It will
-/// fail 30% of the time.  You should write code to handle this.  In addition you should not
-/// attempt a reading more frequently than once every 2 seconds because the DHT22 hardware does
-/// not support that.
+/// fail 30% of the time. You should write code to handle this. In addition you should not attempt a
+/// reading more frequently than once every 2 seconds because the DHT22 hardware does not support
+/// that.
 ///
 /// Implementation taken from
 /// [michaelfletchercgy/dht22_pi](https://github.com/michaelfletchercgy/dht22_pi).
@@ -215,14 +219,11 @@ fn decode_pulses(pulses: &[u16]) -> Result<Reading, ReadingError> {
     data[3] = pulses_to_binary(&pulses[48..64]);
     data[4] = pulses_to_binary(&pulses[64..80]);
 
-    let checksum = data[0]
-        .wrapping_add(data[1])
-        .wrapping_add(data[2])
-        .wrapping_add(data[3]);
+    let checksum = compute_checksum(data[0], data[1], data[2], data[3]);
     debug!(
         "checksum is {:#010b}, expected {:#010b}, match={}",
-        checksum,
         data[4],
+        checksum,
         checksum == data[4]
     );
 
@@ -230,19 +231,9 @@ fn decode_pulses(pulses: &[u16]) -> Result<Reading, ReadingError> {
         return Result::Err(ReadingError::Checksum);
     }
 
-    let h_dec = data[0] as u16 * 256 + data[1] as u16;
-    let h = h_dec as f32 / 10.0f32;
+    let reading = decode_reading(data[0], data[1], data[2], data[3]);
 
-    let t_dec = (data[2] & 0x7f) as u16 * 256 + data[3] as u16;
-    let mut t = t_dec as f32 / 10.0f32;
-    if (data[2] & 0x80) != 0 {
-        t *= -1.0f32;
-    }
-
-    Result::Ok(Reading {
-        temperature: t,
-        humidity: h,
-    })
+    Result::Ok(reading)
 }
 
 fn pulses_to_binary(pulses: &[u16]) -> u8 {
@@ -468,27 +459,6 @@ fn read_pin_inner(
 
     Result::Ok(count)
 }
-
-/// Read temperature and humidity from a DHT22 connected to a Gpio pin on a Raspberry Pi.
-///
-/// On a Raspberry Pi this is implemented using bit-banging which is very error-prone.  It will
-/// fail 30% of the time.  You should write code to handle this.  In addition you should not
-/// attempt a reading more frequently than once every 2 seconds because the DHT22 hardware does
-/// not support that.
-///
-/*
-pub fn read(pin: u8, set_prio: bool) -> Result<Reading, ReadingError> {
-    let mut gpio = match Gpio::new() {
-        Err(e) => return Err(ReadingError::Gpio(e)),
-        Ok(g) => match g.get(pin) {
-            Err(e) => return Err(ReadingError::Gpio(e)),
-            Ok(pin) => pin.into_io(Mode::Output),
-        },
-    };
-
-    read_pin(&mut gpio, set_prio)
-}
-*/
 
 #[cfg(test)]
 mod tests {

@@ -1,7 +1,7 @@
 devices:
   - type: dht22
     alias: dht-1
-    tags: ["dht22","basement"]
+    tags: [ "dht22","basement" ]
     config:
       bcm_pin: 19
       adjust_priority: true
@@ -10,13 +10,13 @@ devices:
     inputs:
       - port: 0
         alias: dht-1-temp
-        tags: ["temp"]
+        tags: [ "temp" ]
       - port: 1
         alias: dht-1-humidity
-        tags: ["humidity"]
+        tags: [ "humidity" ]
   - type: dht22
     alias: dht-2
-    tags: ["dht22","basement"]
+    tags: [ "dht22","basement" ]
     config:
       bcm_pin: 16
       adjust_priority: true
@@ -28,64 +28,4 @@ devices:
         tags: [ "temp" ]
       - port: 1
         alias: dht-2-humidity
-        tags: [ "humidity" ]
-  - type: dht22
-    alias: dht-kitchen
-    tags: ["dht22","kitchen"]
-    config:
-      bcm_pin: 26
-      adjust_priority: true
-      use_experimental_implementation: true
-      readout_interval_seconds: 3
-    inputs:
-      - port: 0
-        alias: dht-kitchen-temp
-        tags: [ "temp" ]
-      - port: 1
-        alias: dht-kitchen-humidity
-        tags: [ "humidity" ]
-  - type: dht22
-    alias: dht-wolle
-    tags: ["dht22","wolle"]
-    config:
-      bcm_pin: 20
-      adjust_priority: true
-      use_experimental_implementation: true
-      readout_interval_seconds: 3
-    inputs:
-      - port: 0
-        alias: dht-wolle-temp
-        tags: [ "temp" ]
-      - port: 1
-        alias: dht-wolle-humidity
-        tags: [ "humidity" ]
-  - type: dht22
-    alias: am-ecke-hinten
-    tags: ["am2302","outside"]
-    config:
-      bcm_pin: 21
-      adjust_priority: true
-      use_experimental_implementation: true
-      readout_interval_seconds: 3
-    inputs:
-      - port: 0
-        alias: am-ecke-hinten-temp
-        tags: [ "temp" ]
-      - port: 1
-        alias: am-ecke-hinten-humidity
-        tags: [ "humidity" ]
-  - type: dht22
-    alias: am-keller
-    tags: ["am2302","keller"]
-    config:
-      bcm_pin: 25
-      adjust_priority: true
-      use_experimental_implementation: true
-      readout_interval_seconds: 3
-    inputs:
-      - port: 0
-        alias: am-keller-temp
-        tags: [ "temp" ]
-      - port: 1
-        alias: am-keller-humidity
         tags: [ "humidity" ]

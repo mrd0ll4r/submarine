@@ -2,4 +2,9 @@ submarine:
   tcp_server_listen_address: "127.0.0.1:3030"
   prometheus_listen_address: "127.0.0.1:6969"
   log_to_file: true
-  device_configs: ["config/pca9685.yaml","config/dht22.yaml","config/mcp23017-input.yaml", "config/bme280.yaml"]
+  device_configs: [
+    "config/pca9685.yaml",
+    "config/dht22.yaml",
+    "config/mcp23017-input.yaml",
+    "config/bme280.yaml"
+  ]

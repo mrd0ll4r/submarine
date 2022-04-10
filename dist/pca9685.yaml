@@ -12,35 +12,35 @@ devices:
     outputs:
       - port: 0
         alias: servo-1
-        tags: ["servo"]
+        tags: [ "servo" ]
         scaling:
           linear:
             from: 4000
             to: 7500
       - port: 1
         alias: servo-2
-        tags: ["servo"]
+        tags: [ "servo" ]
         scaling:
           linear:
             from: 6000
             to: 3500
       - port: 2
         alias: servo-3
-        tags: ["servo"]
+        tags: [ "servo" ]
         scaling:
           linear:
             from: 6500
             to: 4300
       - port: 3
         alias: servo-4
-        tags: ["servo"]
+        tags: [ "servo" ]
         scaling:
           linear:
             from: 3400
             to: 7000
       - port: 4
         alias: servo-5
-        tags: ["servo"]
+        tags: [ "servo" ]
         scaling:
           linear:
             from: 3500
@@ -58,46 +58,46 @@ devices:
     outputs:
       - port: 0
         alias: kitchen-out-b
-        tags: ["rgbw","blue","kitchen"]
+        tags: [ "rgbw", "blue", "kitchen" ]
       - port: 1
         alias: kitchen-out-w
-        tags: ["rgbw","white","kitchen"]
+        tags: [ "rgbw", "white", "kitchen" ]
       - port: 2
         alias: kitchen-out-g
-        tags: ["rgbw","green","kitchen"]
+        tags: [ "rgbw", "green", "kitchen" ]
       - port: 3
         alias: kitchen-out-r
-        tags: ["rgbw","red","kitchen"]
+        tags: [ "rgbw", "red", "kitchen" ]
 
       - port: 4
         alias: kitchen-innen-g
-        tags: ["rgbw","green","kitchen"]
+        tags: [ "rgbw", "green", "kitchen" ]
       - port: 5
         alias: kitchen-innen-r
-        tags: ["rgbw","red","kitchen"]
+        tags: [ "rgbw", "red", "kitchen" ]
       - port: 6
         alias: kitchen-innen-b
-        tags: ["rgbw","blue","kitchen"]
+        tags: [ "rgbw", "blue", "kitchen" ]
       - port: 7
         alias: kitchen-innen-w
-        tags: ["rgbw","white","kitchen"]
+        tags: [ "rgbw", "white", "kitchen" ]
 
       - port: 8
         alias: klo-r
-        tags: ["rgbw","red","klo"]
+        tags: [ "rgbw", "red", "klo" ]
       - port: 9
         alias: klo-g
-        tags: ["rgbw","green","klo"]
+        tags: [ "rgbw", "green", "klo" ]
       - port: 10
         alias: klo-b
-        tags: ["rgbw","blue","klo"]
+        tags: [ "rgbw", "blue", "klo" ]
       - port: 11
         alias: klo-w
-        tags: ["rgbw","white","klo"]
+        tags: [ "rgbw", "white", "klo" ]
 
       - port: 12
         alias: kitchen-spots
-        tags: ["kitchen","spots"]
+        tags: [ "kitchen", "spots" ]
         scaling:
           linear:
             from: 0

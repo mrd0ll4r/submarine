@@ -8,36 +8,36 @@ devices:
     outputs:
       - port: 0
         alias: outlet-8-s1
-        tags: [ "outlet","relais","R2" ]
+        tags: [ "outlet", "relais", "R2" ]
       - port: 1
         alias: outlet-5-s
-        tags: [ "outlet","relais","R2" ]
+        tags: [ "outlet", "relais", "R2" ]
       - port: 2
         alias: outlet-6-s
-        tags: [ "outlet","relais","R2" ]
+        tags: [ "outlet", "relais", "R2" ]
       - port: 5
         alias: outlet-8-s2
-        tags: [ "outlet","relais","R2" ]
+        tags: [ "outlet", "relais", "R2" ]
       # Ports 3, 4 unconnected at R2 in the wall?
 
       - port: 6
         alias: outlet-3-s
-        tags: [ "outlet","relais","R1" ]
+        tags: [ "outlet", "relais", "R1" ]
       - port: 7
         alias: outlet-1-s
-        tags: [ "outlet","relais","R1" ]
+        tags: [ "outlet", "relais", "R1" ]
       - port: 8
         alias: outlet-2-s1
-        tags: [ "outlet","relais","R1" ]
+        tags: [ "outlet", "relais", "R1" ]
       - port: 9
         alias: outlet-4-s1
-        tags: [ "outlet","relais","R1" ]
+        tags: [ "outlet", "relais", "R1" ]
       - port: 10
         alias: outlet-4-s2
-        tags: [ "outlet","relais","R1" ]
+        tags: [ "outlet", "relais", "R1" ]
       - port: 11
         alias: outlet-2-s2
-        tags: [ "outlet","relais","R1" ]
+        tags: [ "outlet", "relais", "R1" ]
   - type: mcp23017
     alias: mcp-2
     tags: [ "mcp23017" ]
@@ -47,20 +47,20 @@ devices:
     outputs:
       - port: 0
         alias: relais-r3-0
-        tags: [ "relais","R3" ]
+        tags: [ "relais", "R3" ]
       - port: 1
         alias: putzlicht-front
-        tags: [ "putzlicht","outside","front","relais","R3" ]
+        tags: [ "putzlicht", "outside", "front", "relais", "R3" ]
       - port: 2
         alias: relais-r3-2
-        tags: [ "relais","R3" ]
+        tags: [ "relais", "R3" ]
       - port: 3
         alias: light-outside-front-door
-        tags: [ "light","outside","front","relais","R3" ]
+        tags: [ "light", "outside", "front", "relais", "R3" ]
       - port: 4
         alias: putzlicht-anbau
-        tags: [ "putzlicht","outside","anbau","relais","R3" ]
+        tags: [ "putzlicht", "outside", "anbau", "relais", "R3" ]
       - port: 5
         alias: outlet-9-s
-        tags: [ "outlet","relais","R3" ]
+        tags: [ "outlet", "relais", "R3" ]
         default: 65535

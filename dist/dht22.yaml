@@ -1,7 +1,7 @@
 devices:
   - type: dht22
     alias: dht-1
-    tags: [ "dht22","basement" ]
+    tags: [ "dht22", "basement" ]
     config:
       bcm_pin: 19
       adjust_priority: true
@@ -16,7 +16,7 @@ devices:
         tags: [ "humidity" ]
   - type: dht22
     alias: dht-2
-    tags: [ "dht22","basement" ]
+    tags: [ "dht22", "basement" ]
     config:
       bcm_pin: 16
       adjust_priority: true

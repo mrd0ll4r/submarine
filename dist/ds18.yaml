@@ -1,17 +1,17 @@
 devices:
   - type: ds18
     alias: ds18b20-auslass-hauptraum-klo
-    tags: ["ds18b20","hauptraum"]
+    tags: [ "ds18b20", "hauptraum" ]
     config:
       id: "28-02131a53e1aa"
       readout_interval_seconds: 2
     inputs:
       - port: 0
         alias: "ds18b20-auslass-hauptraum-klo-temp"
-        tags: ["temp"]
+        tags: [ "temp" ]
   - type: ds18
     alias: ds18b20-warmluft
-    tags: ["ds18b20","basement","warmluft"]
+    tags: [ "ds18b20", "basement", "warmluft" ]
     config:
       id: "28-3c01d0755bcb"
       readout_interval_seconds: 2

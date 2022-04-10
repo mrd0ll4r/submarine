@@ -17,14 +17,14 @@ config:
   virtual_devices:
     - address: 50
       alias: pir-motion
-      groups: ["motion"]
+      groups: [ "motion" ]
       mapping:
         device: bcm-23
         port: 0
       read_only: true
     - address: 51
       alias: radar-motion
-      groups: ["motion"]
+      groups: [ "motion" ]
       mapping:
         device: bcm-24
         port: 0

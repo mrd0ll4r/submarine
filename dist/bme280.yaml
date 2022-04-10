@@ -1,7 +1,7 @@
 devices:
   - type: bme280
     alias: bme-outside-kitchen
-    tags: ["bme280","outside"]
+    tags: [ "bme280", "outside" ]
     config:
       i2c_bus: "/dev/i2c-4"
       i2c_slave_address: 0x76
@@ -19,7 +19,7 @@ devices:
   # Zuluft vor der Heizung
   - type: bme280
     alias: bme-zuluft
-    tags: ["bme280","zuluft"]
+    tags: [ "bme280", "zuluft" ]
     config:
       i2c_bus: "/dev/i2c-5"
       i2c_slave_address: 0x76

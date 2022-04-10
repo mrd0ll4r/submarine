@@ -1,7 +1,7 @@
 devices:
   - type: dht22_expander
     alias: dht-expander-1
-    tags: [ "dht22_expander","dht22" ]
+    tags: [ "dht22_expander", "dht22" ]
     config:
       i2c_bus: "/dev/i2c-1"
       i2c_slave_address: 0x3d
@@ -67,38 +67,38 @@ devices:
 
       - port: 16
         alias: am-keller-schrank-temp
-        tags: [ "temp","basement" ]
+        tags: [ "temp", "basement" ]
       - port: 17
         alias: am-keller-schrank-humidity
-        tags: [ "humidity","basement" ]
+        tags: [ "humidity", "basement" ]
 
       - port: 18
         alias: dht-keller-treppe-temp
-        tags: [ "temp","basement" ]
+        tags: [ "temp", "basement" ]
       - port: 19
         alias: dht-keller-treppe-humidity
-        tags: [ "humidity","basement" ]
+        tags: [ "humidity", "basement" ]
 
       - port: 20
         alias: dht-klo-temp
-        tags: [ "temp","klo" ]
+        tags: [ "temp", "klo" ]
       - port: 21
         alias: dht-klo-humidity
-        tags: [ "humidity","klo" ]
+        tags: [ "humidity", "klo" ]
 
       - port: 22
         alias: am-vorne-links-temp
-        tags: [ "temp","outside" ]
+        tags: [ "temp", "outside" ]
       - port: 23
         alias: am-vorne-links-humidity
-        tags: [ "humidity","outside" ]
+        tags: [ "humidity", "outside" ]
 
       - port: 24
         alias: dht-kitchen-temp
-        tags: [ "temp","kitchen" ]
+        tags: [ "temp", "kitchen" ]
       - port: 25
         alias: dht-kitchen-humidity
-        tags: [ "humidity","kitchen" ]
+        tags: [ "humidity", "kitchen" ]
 
       - port: 26
         #alias: dht-1-temp
@@ -109,14 +109,14 @@ devices:
 
       - port: 28
         alias: dht-wolle-temp
-        tags: [ "temp","wolle" ]
+        tags: [ "temp", "wolle" ]
       - port: 29
         alias: dht-wolle-humidity
-        tags: [ "humidity","wolle" ]
+        tags: [ "humidity", "wolle" ]
 
       - port: 30
         alias: am-hinten-rechts-temp
-        tags: [ "temp","outside" ]
+        tags: [ "temp", "outside" ]
       - port: 31
         alias: am-hinte-rechts-humidity
-        tags: [ "humidity","outside" ]
+        tags: [ "humidity", "outside" ]

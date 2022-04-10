@@ -1,65 +1,66 @@
-config:
-  devices:
-    - type: mcp23017
-      alias: mcp-0
-      config:
-        i2c_bus: ""
-        i2c_slave_address: 32
-    - type: mcp23017
-      alias: mcp-1
-      config:
-        i2c_bus: ""
-        i2c_slave_address: 33
-    - type: mcp23017_input
-      alias: mcp-2
-      config:
-        i2c_bus: ""
-        i2c_slave_address: 34
-        polling_interval_millis: 5
-        enable_pullups: true
-        invert: true
+devices:
+  - type: mcp23017
+    alias: mcp-0
+    tags: [ "mcp23017" ]
+    config:
+      i2c_bus: "/dev/i2c-1"
+      i2c_slave_address: 32
+    outputs:
+      - port: 0
+        alias: outlet-8-s1
+        tags: [ "outlet","relais","R2" ]
+      - port: 1
+        alias: outlet-5-s
+        tags: [ "outlet","relais","R2" ]
+      - port: 2
+        alias: outlet-6-s
+        tags: [ "outlet","relais","R2" ]
+      - port: 5
+        alias: outlet-8-s2
+        tags: [ "outlet","relais","R2" ]
+      # Ports 3, 4 unconnected at R2 in the wall?
 
-  virtual_devices:
-    - address: 1
-      alias: led0
-      groups: ["leds"]
-      mapping:
-        device: mcp-0
-        port: 6
-      read_only: false
-    - address: 2
-      alias: led1
-      groups: ["leds"]
-      mapping:
-        device: mcp-0
-        port: 7
-      read_only: false
-    - address: 3
-      alias: led2
-      groups: ["leds"]
-      mapping:
-        device: mcp-1
-        port: 6
-      read_only: false
-    - address: 4
-      alias: led3
-      groups: ["leds"]
-      mapping:
-        device: mcp-1
-        port: 7
-      read_only: false
-
-    - address: 15
-      alias: button0
-      groups: [""]
-      mapping:
-        device: mcp-2
-        port: 6
-      read_only: true
-    - address: 16
-      alias: button1
-      groups: [""]
-      mapping:
-        device: mcp-2
-        port: 7
-      read_only: true
+      - port: 6
+        alias: outlet-3-s
+        tags: [ "outlet","relais","R1" ]
+      - port: 7
+        alias: outlet-1-s
+        tags: [ "outlet","relais","R1" ]
+      - port: 8
+        alias: outlet-2-s1
+        tags: [ "outlet","relais","R1" ]
+      - port: 9
+        alias: outlet-4-s1
+        tags: [ "outlet","relais","R1" ]
+      - port: 10
+        alias: outlet-4-s2
+        tags: [ "outlet","relais","R1" ]
+      - port: 11
+        alias: outlet-2-s2
+        tags: [ "outlet","relais","R1" ]
+  - type: mcp23017
+    alias: mcp-2
+    tags: [ "mcp23017" ]
+    config:
+      i2c_bus: "/dev/i2c-1"
+      i2c_slave_address: 34
+    outputs:
+      - port: 0
+        alias: relais-r3-0
+        tags: [ "relais","R3" ]
+      - port: 1
+        alias: putzlicht-front
+        tags: [ "putzlicht","outside","front","relais","R3" ]
+      - port: 2
+        alias: relais-r3-2
+        tags: [ "relais","R3" ]
+      - port: 3
+        alias: light-outside-front-door
+        tags: [ "light","outside","front","relais","R3" ]
+      - port: 4
+        alias: putzlicht-anbau
+        tags: [ "putzlicht","outside","anbau","relais","R3" ]
+      - port: 5
+        alias: outlet-9-s
+        tags: [ "outlet","relais","R3" ]
+        default: 65535

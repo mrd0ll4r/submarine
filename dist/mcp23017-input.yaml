@@ -27,3 +27,6 @@ devices:
       - port: 5
         alias: button-front-door-left
         tags: ["button","front-door"]
+      - port: 8
+        alias: motion-sensor-front-door
+        tags: [ "motion-sensor", "front-door" ]

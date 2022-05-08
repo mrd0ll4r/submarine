@@ -95,13 +95,6 @@ devices:
         alias: klo-w
         tags: [ "rgbw", "white", "klo" ]
 
-      - port: 12
-        alias: kitchen-spots
-        tags: [ "kitchen", "spots" ]
-        scaling:
-          linear:
-            from: 0
-            to: 35000
   - type: pca9685_synchronized
     alias: pca9685-2
     config:
@@ -112,3 +105,50 @@ devices:
       output_driver_totem_pole: true
       update_interval_millis: 10
       prescale: 3
+    outputs:
+      - port: 0
+        alias: spoider-inner-up-r
+        tags: [ "rgbw", "red", "hauptraum", "spoider", "up" ]
+      - port: 1
+        alias: spoider-inner-up-b
+        tags: [ "rgbw", "blue", "hauptraum", "spoider", "up" ]
+      - port: 2
+        alias: spoider-inner-up-w
+        tags: [ "rgbw", "white", "hauptraum", "spoider", "up" ]
+      - port: 3
+        alias: spoider-inner-up-g
+        tags: [ "rgbw", "green", "hauptraum", "spoider", "up" ]
+
+      - port: 4
+        alias: spoider-inner-down-g
+        tags: [ "rgbw", "green", "hauptraum", "spoider", "down" ]
+      - port: 5
+        alias: spoider-inner-down-r
+        tags: [ "rgbw", "red", "hauptraum", "spoider", "down" ]
+      - port: 6
+        alias: spoider-inner-down-w
+        tags: [ "rgbw", "white", "hauptraum", "spoider", "down" ]
+      - port: 7
+        alias: spoider-inner-down-b
+        tags: [ "rgbw", "blue", "hauptraum", "spoider", "down" ]
+
+      - port: 8
+        alias: spoider-outer-b
+        tags: [ "rgbw", "blue", "hauptraum", "spoider", "down" ]
+      - port: 9
+        alias: spoider-outer-r
+        tags: [ "rgbw", "red", "hauptraum", "spoider", "down" ]
+      - port: 10
+        alias: spoider-outer-g
+        tags: [ "rgbw", "green", "hauptraum", "spoider", "down" ]
+      - port: 11
+        alias: spoider-outer-w
+        tags: [ "rgbw", "white", "hauptraum", "spoider", "down" ]
+
+      - port: 12
+        alias: kitchen-spots
+        tags: [ "kitchen", "spots" ]
+        scaling:
+          linear:
+            from: 0
+            to: 35000

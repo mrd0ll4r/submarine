@@ -52,8 +52,8 @@ devices:
         alias: putzlicht-front
         tags: [ "putzlicht", "outside", "front", "relais", "R3" ]
       - port: 2
-        alias: relais-r3-2
-        tags: [ "relais", "R3" ]
+        alias: circulation-fan
+        tags: [ "fan", "kitchen", "basement", "relais", "R3" ]
       - port: 3
         alias: light-outside-front-door
         tags: [ "light", "outside", "front", "relais", "R3" ]

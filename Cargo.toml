@@ -7,6 +7,7 @@ edition = "2018"
 [dependencies]
 # Core
 failure = {version="0.1", features=["std","backtrace"]}
+failure_derive = "0.1.8"
 log = {version = "0.4", features = ["std","serde"]}
 flexi_logger = {version="0.16",features=["compress"]}
 itertools = "0.9"

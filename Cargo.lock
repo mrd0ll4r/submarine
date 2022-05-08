@@ -1109,6 +1109,7 @@ dependencies = [
  "chrono",
  "embedded-hal",
  "failure",
+ "failure_derive",
  "flexi_logger",
  "futures",
  "itertools",

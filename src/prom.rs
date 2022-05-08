@@ -106,6 +106,12 @@ lazy_static! {
         exponential_buckets(150_f64, (1.5_f64).sqrt(), 10).unwrap()
     )
     .unwrap();
+    pub static ref MCP23017_READS: IntCounterVec = register_int_counter_vec!(
+        "mcp23017_reads",
+        "reads performed for MCP23017 input expanders by alias and result",
+        &["alias", "result"]
+    )
+    .unwrap();
 }
 
 // Event-related metrics.

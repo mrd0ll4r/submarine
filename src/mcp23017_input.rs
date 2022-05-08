@@ -25,6 +25,17 @@ pub struct MCP23017InputConfig {
     invert: bool,
 }
 
+#[derive(Fail, Debug)]
+enum MCPInputError<E>
+where
+    E: Sync + Send + std::fmt::Debug + 'static,
+{
+    #[fail(display = "Suspicious all-one readout")]
+    SuspiciousValue,
+    #[fail(display = "I2C error: {:?}", _0)]
+    I2C(E),
+}
+
 impl MCP23017Input {
     pub fn new<I2C, E>(
         dev: I2C,
@@ -110,7 +121,16 @@ impl MCP23017Input {
         let mut sleep_duration = polling_interval;
         let mut last_wakeup = Instant::now();
         let hist = prom::MCP23017_READ_DURATION
-            .get_metric_with_label_values(&[&alias])
+            .get_metric_with_label_values(&[alias.as_str()])
+            .unwrap();
+        let reads_counter_ok = prom::MCP23017_READS
+            .get_metric_with_label_values(&[alias.as_str(), "ok"])
+            .unwrap();
+        let reads_counter_i2c_err = prom::MCP23017_READS
+            .get_metric_with_label_values(&[alias.as_str(), "i2c_error"])
+            .unwrap();
+        let reads_counter_suspicious_value = prom::MCP23017_READS
+            .get_metric_with_label_values(&[alias.as_str(), "suspicious_value"])
             .unwrap();
 
         loop {
@@ -139,8 +159,24 @@ impl MCP23017Input {
             );
 
             if let Err(e) = res {
-                warn!("{}: unable to read values: {:?}", alias, e);
-                core.set_error_on_all_ports(ts, format!("{:?}", e))
+                match e {
+                    MCPInputError::SuspiciousValue => {
+                        reads_counter_suspicious_value.inc();
+                        warn!("{}: got suspicious all-one reading. Ignoring.", alias)
+                        // We do not set an error on all ports, because that clears prior values.
+                        // Instead, we just leave everything as it is, and try again next readout.
+                        // This way, no (human-caused) events should get lost.
+                        // On the downside, we might miscalculate some button_pressed duration, but
+                        // only by a few milliseconds..
+                    }
+                    MCPInputError::I2C(e) => {
+                        reads_counter_i2c_err.inc();
+                        warn!("{}: unable to read values: {:?}", alias, e);
+                        core.set_error_on_all_ports(ts, format!("{:?}", e))
+                    }
+                }
+            } else {
+                reads_counter_ok.inc();
             }
 
             let (s, lagging) = poll::calculate_sleep_duration(wake_up, polling_interval);
@@ -164,7 +200,7 @@ impl MCP23017Input {
         down: &mut [Instant; 16],
         down_secs: &mut [u64; 16],
         alias: &str,
-    ) -> Result<()>
+    ) -> std::result::Result<(), MCPInputError<E>>
     where
         I2C: hal::blocking::i2c::Write<Error = E>
             + Send
@@ -173,9 +209,7 @@ impl MCP23017Input {
         E: Sync + Send + std::fmt::Debug + 'static,
     {
         let before = Instant::now();
-        let vals = dev
-            .read_gpioab()
-            .map_err(|err| failure::err_msg(format!("{:?}", err)))?;
+        let vals = dev.read_gpioab().map_err(|err| MCPInputError::I2C(err))?;
         let after = Instant::now();
         hist.observe(after.duration_since(before).as_micros() as f64);
         debug!(
@@ -184,6 +218,10 @@ impl MCP23017Input {
             after.duration_since(before).as_micros(),
             ((2 * 8) as f64 / after.duration_since(before).as_secs_f64()) / 1024_f64
         );
+
+        if vals == 0b1111_1111_1111_1111 {
+            return Err(MCPInputError::SuspiciousValue);
+        }
 
         let (high, low) = (((vals >> 8) & 0xFF) as u8, (vals & 0xFF) as u8);
         let vals = (low as u16) << 8 | high as u16;

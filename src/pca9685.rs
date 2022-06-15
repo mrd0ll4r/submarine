@@ -90,10 +90,7 @@ where
         dev,
         last_change: Instant::now(),
         device_enabled: true,
-        sleep_after: config
-            .sleep_after_millis
-            .clone()
-            .map(|millis| Duration::from_millis(millis)),
+        sleep_after: config.sleep_after_millis.map(Duration::from_millis),
     })
 }
 
@@ -239,7 +236,7 @@ impl PCA9685 {
         E: Sync + Send + std::fmt::Debug + 'static,
     {
         // Calculate ON/OFF values
-        let start_stop_values = Self::calculate_on_off_values(&values, scalings);
+        let start_stop_values = Self::calculate_on_off_values(values, scalings);
         assert_eq!(start_stop_values.len(), 32);
         debug!(
             "start_stop values: [{}]",

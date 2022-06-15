@@ -102,7 +102,7 @@ fn decode(arr: [usize; DHT_PULSES * 2]) -> Result<Reading, ReadingError> {
 
     threshold /= DHT_PULSES - 1;
 
-    let mut data = [0 as u8; 5];
+    let mut data = [0_u8; 5];
     let mut i = 3;
     while i < DHT_PULSES * 2 {
         let index = (i - 3) / 16;

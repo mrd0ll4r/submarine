@@ -4,7 +4,7 @@ use crate::config::{
 use crate::device_core::{DeviceRWCore, SynchronizedDeviceRWCore};
 use crate::dht22::DHT22;
 use crate::ds18::DS18;
-use crate::gpio::GPIO;
+use crate::gpio::Gpio;
 use crate::pca9685::PCA9685Config;
 use crate::pca9685_sync::PCA9685Synchronized;
 use crate::prom;
@@ -133,7 +133,7 @@ pub(crate) enum DeviceType {
     MCP23017Input(Box<dyn InputHardwareDevice>),
     MCP23017(Box<dyn OutputHardwareDevice>),
     BME280(Box<dyn InputHardwareDevice>),
-    GPIO(Box<dyn InputHardwareDevice>),
+    Gpio(Box<dyn InputHardwareDevice>),
 }
 
 impl Debug for DeviceType {
@@ -152,7 +152,7 @@ impl DeviceType {
             DeviceType::MCP23017Input(_) => alloy::config::DeviceType::MCP23017,
             DeviceType::MCP23017(_) => alloy::config::DeviceType::MCP23017,
             DeviceType::BME280(_) => alloy::config::DeviceType::BME280,
-            DeviceType::GPIO(_) => alloy::config::DeviceType::GPIO,
+            DeviceType::Gpio(_) => alloy::config::DeviceType::GPIO,
         }
     }
 }
@@ -247,7 +247,7 @@ impl PortState {
         v.clone().map(|v| AddressedEvent {
             address: self.address,
             event: Event {
-                timestamp: v.ts.clone(),
+                timestamp: v.ts,
                 inner: v.value.map(|val| EventKind::Update { new_value: val }),
             },
         })
@@ -264,7 +264,7 @@ impl InputPortState {
     fn to_alloy_port_config(&self) -> alloy::config::InputPortConfig {
         alloy::config::InputPortConfig {
             alias: self.port.alias.clone(),
-            input_type: self.value_type.clone(),
+            input_type: self.value_type,
             tags: self.port.tags.clone(),
             port: self.port.port,
             address: self.port.address,
@@ -307,7 +307,7 @@ impl UniverseState {
                 | DeviceType::DS18(_)
                 | DeviceType::MCP23017Input(_)
                 | DeviceType::BME280(_)
-                | DeviceType::GPIO(_) => {}
+                | DeviceType::Gpio(_) => {}
                 DeviceType::PCA9685(dev) => {
                     if let Err(e) = dev.update() {
                         error!("unable to update output device {}: {:?}", &device.alias, e)
@@ -321,7 +321,7 @@ impl UniverseState {
             }
         }
 
-        return Ok(());
+        Ok(())
     }
 
     pub(crate) async fn set_address(&mut self, address: Address, value: OutputValue) -> Result<()> {
@@ -361,7 +361,7 @@ impl UniverseState {
         let sender = self
             .event_streams
             .get(&addr)
-            .ok_or(err_msg("invalid address"))?;
+            .ok_or_else(|| err_msg("invalid address"))?;
         Ok(sender.subscribe())
     }
 
@@ -401,7 +401,7 @@ impl UniverseState {
                 | DeviceType::DS18(input_dev)
                 | DeviceType::MCP23017Input(input_dev)
                 | DeviceType::BME280(input_dev)
-                | DeviceType::GPIO(input_dev) => UniverseState::create_input_port_mappings(
+                | DeviceType::Gpio(input_dev) => UniverseState::create_input_port_mappings(
                     &mut aliases,
                     &mut address_counter,
                     &mut event_broadcasters,
@@ -431,7 +431,7 @@ impl UniverseState {
             let state = HardwareDeviceState {
                 alias: device_alias,
                 tags: device_config.tags.unwrap_or_default(),
-                device_type: tokio::sync::Mutex::new(dev),
+                device_type: Mutex::new(dev),
                 input_ports,
                 output_ports,
             };
@@ -445,7 +445,7 @@ impl UniverseState {
         }
 
         Ok(UniverseState {
-            version: tokio::sync::Mutex::new(Cell::new(1)),
+            version: Mutex::new(Cell::new(1)),
             devices,
             output_ports: addressed_output_ports,
             event_streams: event_broadcasters,
@@ -465,7 +465,7 @@ impl UniverseState {
         output_ports: &mut Vec<OutputPortState>,
         output_dev: &Box<dyn OutputHardwareDevice>,
     ) -> Result<()> {
-        Self::ensure_no_input_port_mappings_configured(&device_config, &device_alias)?;
+        Self::ensure_no_input_port_mappings_configured(device_config, device_alias)?;
 
         for port_config in device_config.outputs.clone().unwrap_or_else(|| {
             warn!(
@@ -558,14 +558,10 @@ impl UniverseState {
                 match event.inner.clone() {
                     Ok(ek) => {
                         if let alloy::event::EventKind::Update { new_value } = ek {
-                            port.update_last_value(event.timestamp.clone(), Ok(new_value))
-                                .await
+                            port.update_last_value(event.timestamp, Ok(new_value)).await
                         }
                     }
-                    Err(err) => {
-                        port.update_last_value(event.timestamp.clone(), Err(err))
-                            .await
-                    }
+                    Err(err) => port.update_last_value(event.timestamp, Err(err)).await,
                 }
 
                 // Push into broadcast channel
@@ -618,7 +614,7 @@ impl UniverseState {
         input_ports: &mut Vec<InputPortState>,
         input_dev: &Box<dyn InputHardwareDevice>,
     ) -> Result<()> {
-        Self::ensure_no_output_port_mappings_configured(&device_config, &device_alias)?;
+        Self::ensure_no_output_port_mappings_configured(device_config, device_alias)?;
 
         for port_config in device_config.inputs.clone().unwrap_or_else(|| {
             warn!(
@@ -742,14 +738,14 @@ impl UniverseState {
         let dev = match &device_config.hardware_device_config {
             config::HardwareDeviceConfig::PCA9685 { config: cfg } => {
                 debug!("creating PCA9685 {}...", alias);
-                let dev = if cfg.i2c_bus == "" {
+                let dev = if cfg.i2c_bus.is_empty() {
                     warn!("using I2C mock");
                     let i2c = i2c_mock::I2cMock::new();
-                    pca9685::PCA9685::new(i2c, &cfg, alias.clone())?
+                    pca9685::PCA9685::new(i2c, cfg, alias)?
                 } else {
                     debug!("using I2C at {}", cfg.i2c_bus);
                     let i2c = linux_hal::I2cdev::new(cfg.i2c_bus.clone())?;
-                    pca9685::PCA9685::new(i2c, &cfg, alias.clone())?
+                    pca9685::PCA9685::new(i2c, cfg, alias)?
                 };
                 DeviceType::PCA9685(Box::new(dev))
             }
@@ -766,7 +762,7 @@ impl UniverseState {
                 synchronized_pca9685s.entry(i2c_bus).or_default().push((
                     core.clone(),
                     cfg.clone(),
-                    alias.clone(),
+                    alias,
                 ));
 
                 DeviceType::PCA9685(Box::new(core))
@@ -774,74 +770,74 @@ impl UniverseState {
             config::HardwareDeviceConfig::DS18 { config: cfg } => {
                 debug!("creating DS18 {}...", alias);
 
-                let dev = DS18::new(alias.clone(), cfg)?;
+                let dev = DS18::new(alias, cfg)?;
                 DeviceType::DS18(Box::new(dev))
             }
             config::HardwareDeviceConfig::MCP23017 { config: cfg } => {
                 debug!("creating MCP23017 {}...", alias);
 
-                let dev = if cfg.i2c_bus == "" {
+                let dev = if cfg.i2c_bus.is_empty() {
                     warn!("using I2C mock");
                     let i2c = i2c_mock::I2cMock::new();
-                    mcp23017::MCP23017::new(i2c, &cfg, alias.clone())?
+                    mcp23017::MCP23017::new(i2c, cfg, alias)?
                 } else {
                     debug!("using I2C at {}", cfg.i2c_bus);
                     let i2c = linux_hal::I2cdev::new(cfg.i2c_bus.clone())?;
-                    mcp23017::MCP23017::new(i2c, &cfg, alias.clone())?
+                    mcp23017::MCP23017::new(i2c, cfg, alias)?
                 };
                 DeviceType::MCP23017(Box::new(dev))
             }
             config::HardwareDeviceConfig::MCP23017Input { config: cfg } => {
                 debug!("creating MCP23017Input {}...", alias);
 
-                let dev = if cfg.i2c_bus == "" {
+                let dev = if cfg.i2c_bus.is_empty() {
                     warn!("using I2C mock");
                     let i2c = i2c_mock::I2cMock::new();
-                    mcp23017_input::MCP23017Input::new(i2c, &cfg, alias.clone())?
+                    mcp23017_input::MCP23017Input::new(i2c, cfg, alias)?
                 } else {
                     debug!("using I2C at {}", cfg.i2c_bus);
                     let i2c = linux_hal::I2cdev::new(cfg.i2c_bus.clone())?;
-                    mcp23017_input::MCP23017Input::new(i2c, &cfg, alias.clone())?
+                    mcp23017_input::MCP23017Input::new(i2c, cfg, alias)?
                 };
                 DeviceType::MCP23017Input(Box::new(dev))
             }
             config::HardwareDeviceConfig::BME280 { config: cfg } => {
                 debug!("creating BME280 {}...", alias);
 
-                let dev = if cfg.i2c_bus == "" {
+                let dev = if cfg.i2c_bus.is_empty() {
                     warn!("using I2C mock");
                     let i2c = i2c_mock::I2cMock::new();
-                    crate::bme280::BME280::new(i2c, &cfg, alias.clone())?
+                    crate::bme280::BME280::new(i2c, cfg, alias)?
                 } else {
                     debug!("using I2C at {}", cfg.i2c_bus);
                     let i2c = linux_hal::I2cdev::new(cfg.i2c_bus.clone())?;
-                    crate::bme280::BME280::new(i2c, &cfg, alias.clone())?
+                    crate::bme280::BME280::new(i2c, cfg, alias)?
                 };
                 DeviceType::BME280(Box::new(dev))
             }
             config::HardwareDeviceConfig::DHT22 { config } => {
                 debug!("creating DHT22 {}...", alias);
 
-                let dev = DHT22::new(alias.clone(), &config).context("unable to create DHT22")?;
+                let dev = DHT22::new(alias, config).context("unable to create DHT22")?;
                 DeviceType::DHT22(Box::new(dev))
             }
-            config::HardwareDeviceConfig::GPIO { config } => {
+            config::HardwareDeviceConfig::Gpio { config } => {
                 debug!("creating GPIO {}...", alias);
 
-                let dev = GPIO::new(alias.clone(), &config).context("unable to create GPIO")?;
-                DeviceType::GPIO(Box::new(dev))
+                let dev = Gpio::new(alias, config).context("unable to create GPIO")?;
+                DeviceType::Gpio(Box::new(dev))
             }
             HardwareDeviceConfig::DHT22Expander { config } => {
                 debug!("creating DHT22Expander {}...", alias);
 
-                let dev = if config.i2c_bus == "" {
+                let dev = if config.i2c_bus.is_empty() {
                     warn!("using I2C mock");
                     let i2c = i2c_mock::I2cMock::new();
-                    crate::dht22_expander::DHT22Expander::new(i2c, alias.clone(), &config)?
+                    crate::dht22_expander::DHT22Expander::new(i2c, alias, config)?
                 } else {
                     debug!("using I2C at {}", config.i2c_bus);
                     let i2c = linux_hal::I2cdev::new(config.i2c_bus.clone())?;
-                    crate::dht22_expander::DHT22Expander::new(i2c, alias.clone(), &config)?
+                    crate::dht22_expander::DHT22Expander::new(i2c, alias, config)?
                 };
                 DeviceType::DHT22Expander(Box::new(dev))
             }
@@ -858,7 +854,7 @@ impl UniverseState {
     ) -> Result<()> {
         for (i2c_bus, cores) in synchronized_pca9685s.into_iter() {
             let mut update_interval = 0;
-            if i2c_bus == "" {
+            if i2c_bus.is_empty() {
                 warn!("using I2C mock");
                 let mut synced_pca = PCA9685Synchronized::new();
                 for (core, cfg, alias) in cores.into_iter() {

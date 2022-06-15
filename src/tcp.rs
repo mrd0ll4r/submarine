@@ -68,7 +68,7 @@ impl Client {
         event_sink: Sender<AddressedEvent>,
     ) -> Result<()> {
         let filters = subscriptions.get(&req.address);
-        if let None = filters {
+        if filters.is_none() {
             return Err(err_msg(format!("invalid address: {}", req.address)));
         }
 
@@ -87,7 +87,7 @@ impl Client {
                 .get_event_stream(req.address)
                 .context("invalid address")?;
             let address = req.address;
-            let remote = remote.clone();
+            let remote = *remote;
             let subscriptions = subscriptions.clone();
             task::spawn(async move {
                 debug!("event_filter {}/{}: started", remote, address);
@@ -115,13 +115,13 @@ impl Client {
                         Ok(e) => e,
                     };
 
-                    let f = subscriptions.get(&address).expect(
-                        format!("missing subscriptions entry for address {}", address).as_str(),
-                    );
+                    let f = subscriptions.get(&address).unwrap_or_else(|| {
+                        panic!("missing subscriptions entry for address {}", address)
+                    });
                     let filters = {
                         let filters = f.lock().await;
 
-                        if let None = *filters {
+                        if filters.is_none() {
                             // No more filters there, so we should quit
                             break;
                         }
@@ -137,7 +137,8 @@ impl Client {
                     );
 
                     let res = event_sink.send(event).await;
-                    if let Err(_) = res {
+                    if res.is_err() {
+                        // The only possible error is a SendError, if the remote is closed.
                         debug!("event_filter {}/{}: unable to send", remote, address);
                         break;
                     }
@@ -207,7 +208,7 @@ impl Client {
                         "handler {}: received request with ID {}: {:?}",
                         remote, id, inner
                     );
-                    let remote = remote.clone();
+                    let remote = remote;
                     let state = state.clone();
                     let event_sink = event_sink.clone();
                     let subscriptions = subscriptions.clone();
@@ -219,7 +220,8 @@ impl Client {
                                 .map_err(|e| format!("{:?}", e));
 
                         let res = output.send(Message::Response { id, inner: result }).await;
-                        if let Err(_) = res {
+                        if res.is_err() {
+                            // The only possible error is a SendError, if the remote is closed.
                             debug!("in-flight request for {}: shutting down", remote);
                         }
                     });
@@ -252,13 +254,12 @@ impl Client {
         let subscriptions = cfg
             .devices
             .iter()
-            .map(|dev| {
+            .flat_map(|dev| {
                 dev.inputs
                     .iter()
                     .map(|input| input.address)
                     .chain(dev.outputs.iter().map(|output| output.address))
             })
-            .flatten()
             .map(|addr| (addr, Mutex::new(None)))
             .collect();
 
@@ -331,14 +332,14 @@ impl Stream for GreedyBuffer {
                 Some(e) => {
                     self.buf.push(e);
                     if self.buf.len() >= self.chunk_size {
-                        return Poll::Ready(Some(mem::replace(&mut self.buf, Default::default())));
+                        return Poll::Ready(Some(mem::take(&mut self.buf)));
                     }
                 }
                 None => {
                     // Underlying stream is closed, send out remaining elements if we have any.
                     self.fused = true;
                     return if !self.buf.is_empty() {
-                        Poll::Ready(Some(mem::replace(&mut self.buf, Default::default())))
+                        Poll::Ready(Some(mem::take(&mut self.buf)))
                     } else {
                         Poll::Ready(None)
                     };
@@ -349,7 +350,7 @@ impl Stream for GreedyBuffer {
         // Nothing available  right now, see if we have anything buffered, if yes send that out.
         debug!("GreedyBuffer got Pending");
         if !self.buf.is_empty() {
-            Poll::Ready(Some(mem::replace(&mut self.buf, Default::default())))
+            Poll::Ready(Some(mem::take(&mut self.buf)))
         } else {
             Poll::Pending
         }

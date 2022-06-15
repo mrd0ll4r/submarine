@@ -34,7 +34,7 @@ impl DeviceReadCore {
             device_values: iter::repeat_with(|| None).take(value_types.len()).collect(),
             events: iter::repeat(None).take(value_types.len()).collect(),
             wakers: iter::repeat(None).take(value_types.len()).collect(),
-            value_types: value_types.iter().cloned().collect(),
+            value_types: value_types.to_vec(),
         }
     }
 
@@ -64,7 +64,7 @@ impl DeviceReadCore {
         match event {
             None => {
                 self.wakers[index] = Some(cx.waker().clone());
-                return Poll::Pending;
+                Poll::Pending
             }
             Some(event) => Poll::Ready(Some(event)),
         }

@@ -5,14 +5,15 @@ use alloy::config::{InputValue, InputValueType};
 use failure::ResultExt;
 use rand::Rng;
 use rppal::gpio;
-use rppal::gpio::{Gpio, Level};
+use rppal::gpio::Gpio as RGpio;
+use rppal::gpio::Level;
 use serde::{Deserialize, Serialize};
 use std::thread;
 use std::time::Duration;
 
 /// Configuration for a GPIO pin.
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub(crate) struct GPIOConfig {
+pub(crate) struct GpioConfig {
     bcm_pin: u8,
     pull: PullUpDown,
     readout_interval_milliseconds: u64,
@@ -28,12 +29,12 @@ pub(crate) enum PullUpDown {
     Down,
 }
 
-pub(crate) struct GPIO {
+pub(crate) struct Gpio {
     core: SynchronizedDeviceReadCore,
 }
 
-impl GPIO {
-    pub(crate) fn new(alias: String, cfg: &GPIOConfig) -> Result<GPIO> {
+impl Gpio {
+    pub(crate) fn new(alias: String, cfg: &GpioConfig) -> Result<Gpio> {
         ensure!(
             cfg.readout_interval_milliseconds > 0,
             "readout_interval_milliseconds must be > 0"
@@ -42,7 +43,7 @@ impl GPIO {
         // Check if the pin is available
         // TODO figure out if this ever becomes un-available.
         // If yes: re-create it for each measurement...
-        let pin = Gpio::new()
+        let pin = RGpio::new()
             .context("unable to get GPIOs - is this a Raspberry Pi?")?
             .get(cfg.bcm_pin)
             .context(format!("unable to get pin {} - maybe busy?", cfg.bcm_pin))?;
@@ -60,9 +61,9 @@ impl GPIO {
 
         thread::Builder::new()
             .name(format!("GPIO {}", alias))
-            .spawn(move || GPIO::update_async(alias, thread_core, pin, readout_interval))?;
+            .spawn(move || Gpio::update_async(alias, thread_core, pin, readout_interval))?;
 
-        Ok(GPIO { core })
+        Ok(Gpio { core })
     }
 
     fn update_async(
@@ -99,14 +100,14 @@ impl GPIO {
     }
 }
 
-impl InputHardwareDevice for GPIO {
+impl InputHardwareDevice for Gpio {
     fn get_input_port(&self, port: u8) -> Result<(InputValueType, EventStream)> {
         ensure!(port < 1, "GPIO has one port only");
         self.core.get_input_port(port)
     }
 }
 
-impl HardwareDevice for GPIO {
+impl HardwareDevice for Gpio {
     fn port_alias(&self, port: u8) -> Result<String> {
         ensure!(port < 1, "GPIO has one port only");
         Ok("pin".to_string())

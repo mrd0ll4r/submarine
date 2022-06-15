@@ -120,7 +120,7 @@ impl DHT22Expander {
         // Launch a thread to do the work.
         let thread_core = inner.clone();
         let readout_interval = cfg.readout_interval_seconds;
-        let power_cycle_interval = cfg.power_cycle_every_n_readouts.clone();
+        let power_cycle_interval = cfg.power_cycle_every_n_readouts;
         let power_cycle_power_down_seconds = cfg.power_cycle_power_off_seconds.unwrap_or(0);
         thread::Builder::new()
             .name(format!("DHT22Expander {}", alias))
@@ -210,7 +210,7 @@ impl DHT22Expander {
             readout_counter += 1;
 
             // Check if we need to power cycle.
-            if let Some(n) = power_cycle_every_n_readouts.clone() {
+            if let Some(n) = power_cycle_every_n_readouts {
                 if readout_counter >= n {
                     debug!("{}: attempting to power cycle sensors", alias);
                     // Power cycle
@@ -345,12 +345,8 @@ impl DHT22Expander {
                     warn!("{}: failed to read DHT {}: {:?}", alias, i, e);
 
                     let msg = format!("{:?}", e);
-                    core.update_value_and_generate_events(
-                        ts,
-                        i * 2,
-                        Err(err_msg(msg.clone()).into()),
-                    );
-                    core.update_value_and_generate_events(ts, i * 2 + 1, Err(err_msg(msg).into()));
+                    core.update_value_and_generate_events(ts, i * 2, Err(err_msg(msg.clone())));
+                    core.update_value_and_generate_events(ts, i * 2 + 1, Err(err_msg(msg)));
 
                     // Set prometheus counters accordingly.
                     match e {

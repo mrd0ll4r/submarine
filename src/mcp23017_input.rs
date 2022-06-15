@@ -150,7 +150,7 @@ impl MCP23017Input {
             let res = MCP23017Input::update_inner(
                 &mut core,
                 wake_up,
-                ts.clone(),
+                ts,
                 &mut dev,
                 &hist,
                 &mut down,
@@ -233,49 +233,47 @@ impl MCP23017Input {
         }
 
         for (i, new_val) in new_values.iter().enumerate() {
-            if let Some(ref previous_val) = core.device_values[i] {
-                if let Ok(previous_val) = previous_val {
-                    let previous_val = *previous_val == InputValue::Binary(true);
-                    let down_for = mono_ts.duration_since(down[i]);
+            if let Some(Ok(previous_val)) = core.device_values[i] {
+                let previous_val = previous_val == InputValue::Binary(true);
+                let down_for = mono_ts.duration_since(down[i]);
 
-                    if *new_val && !previous_val {
-                        // Down
+                if *new_val && !previous_val {
+                    // Down
+                    if let Some(events) = &mut core.events[i] {
+                        events.push_back(Event {
+                            timestamp: real_ts,
+                            inner: Ok(EventKind::Button(ButtonEvent::Down)),
+                        });
+                    }
+                    down[i] = mono_ts;
+                    down_secs[i] = 0;
+                } else if !*new_val && previous_val {
+                    // Up
+                    if let Some(events) = &mut core.events[i] {
+                        events.push_back(Event {
+                            timestamp: real_ts,
+                            inner: Ok(EventKind::Button(ButtonEvent::Up)),
+                        });
+                        events.push_back(Event {
+                            timestamp: real_ts,
+                            inner: Ok(EventKind::Button(ButtonEvent::Clicked {
+                                duration: down_for,
+                            })),
+                        });
+                    }
+                } else if *new_val {
+                    // No change (because other arms didn't match)
+                    // And was down, so is still down
+                    // So process this as a long-press
+                    if down_for.as_secs() > down_secs[i] {
+                        down_secs[i] = down_for.as_secs();
                         if let Some(events) = &mut core.events[i] {
                             events.push_back(Event {
                                 timestamp: real_ts,
-                                inner: Ok(EventKind::Button(ButtonEvent::Down)),
-                            });
-                        }
-                        down[i] = mono_ts;
-                        down_secs[i] = 0;
-                    } else if !*new_val && previous_val {
-                        // Up
-                        if let Some(events) = &mut core.events[i] {
-                            events.push_back(Event {
-                                timestamp: real_ts,
-                                inner: Ok(EventKind::Button(ButtonEvent::Up)),
-                            });
-                            events.push_back(Event {
-                                timestamp: real_ts,
-                                inner: Ok(EventKind::Button(ButtonEvent::Clicked {
-                                    duration: down_for,
+                                inner: Ok(EventKind::Button(ButtonEvent::LongPress {
+                                    seconds: down_secs[i],
                                 })),
                             });
-                        }
-                    } else if *new_val {
-                        // No change (because other arms didn't match)
-                        // And was down, so is still down
-                        // So process this as a long-press
-                        if down_for.as_secs() > down_secs[i] {
-                            down_secs[i] = down_for.as_secs();
-                            if let Some(events) = &mut core.events[i] {
-                                events.push_back(Event {
-                                    timestamp: real_ts,
-                                    inner: Ok(EventKind::Button(ButtonEvent::LongPress {
-                                        seconds: down_secs[i],
-                                    })),
-                                });
-                            }
                         }
                     }
                 }

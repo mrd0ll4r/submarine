@@ -110,7 +110,7 @@ impl DHT22 {
 
     fn do_read_sensor(
         core: &SynchronizedDeviceReadCore,
-        mut pin: &mut IoPin,
+        pin: &mut IoPin,
         adjust_priority: bool,
         use_experimental_implementation: bool,
         ok_counter: &GenericCounter<AtomicI64>,
@@ -120,9 +120,9 @@ impl DHT22 {
         suspicious_value_counter: &GenericCounter<AtomicI64>,
     ) {
         let readings = if use_experimental_implementation {
-            dht22_lib::read_pin_2(&mut pin, adjust_priority)
+            dht22_lib::read_pin_2(pin, adjust_priority)
         } else {
-            dht22_lib::read_pin(&mut pin, adjust_priority)
+            dht22_lib::read_pin(pin, adjust_priority)
         };
         // Take this timestamp after the reading, because that takes a few milliseconds.
         let ts = chrono::Utc::now();

@@ -2,7 +2,7 @@ use crate::bme280::BME280Config;
 use crate::dht22::DHT22Config;
 use crate::dht22_expander::DHT22ExpanderConfig;
 use crate::ds18::DS18Config;
-use crate::gpio::GPIOConfig;
+use crate::gpio::GpioConfig;
 use crate::mcp23017::MCP23017Config;
 use crate::mcp23017_input::MCP23017InputConfig;
 use crate::pca9685::PCA9685Config;
@@ -50,12 +50,7 @@ impl AggregatedConfig {
         for c in devices {
             if let Some(d) = c.devices {
                 for dev in d {
-                    if cfg
-                        .devices
-                        .iter()
-                        .find(|ddev| ddev.alias == dev.alias)
-                        .is_some()
-                    {
+                    if cfg.devices.iter().any(|ddev| ddev.alias == dev.alias) {
                         return Err(err_msg(format!("duplicate device alias {}", dev.alias)));
                     }
                     cfg.devices.push(dev)
@@ -210,5 +205,5 @@ pub(crate) enum HardwareDeviceConfig {
     #[serde(rename = "dht22_expander")]
     DHT22Expander { config: DHT22ExpanderConfig },
     #[serde(rename = "gpio")]
-    GPIO { config: GPIOConfig },
+    Gpio { config: GpioConfig },
 }

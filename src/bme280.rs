@@ -7,12 +7,21 @@ use bme280;
 use embedded_hal as hal;
 use failure::*;
 use linux_embedded_hal;
-use prometheus::core::{AtomicI64, GenericCounter};
 use prometheus::Histogram;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::thread;
 use std::time::{Duration, Instant};
+
+// Pressure threshold to trigger a device reset
+// between two adjacent readouts, in pascal.
+const DEVICE_RESET_PRESSURE_DIFF: f32 = 20_000_f32;
+
+#[derive(Debug)]
+enum ReadoutError<E: Sync + Send + std::fmt::Debug + 'static> {
+    SuspiciousValue { pressure_diff: f32 },
+    Readout(bme280::Error<E>),
+}
 
 pub(crate) struct BME280 {
     inner: SynchronizedDeviceReadCore,
@@ -23,6 +32,7 @@ pub struct BME280Config {
     pub i2c_bus: String,
     i2c_slave_address: u8,
     readout_interval_seconds: u8,
+    reset_every_n_readouts: Option<u16>,
 }
 
 impl BME280 {
@@ -42,6 +52,9 @@ impl BME280 {
         let mut sensor =
             bme280::BME280::new(dev, config.i2c_slave_address, linux_embedded_hal::Delay);
 
+        // TODO by default this a long IIR filter.
+        // TODO with our low readout frequency, we probably don't need any of the IIR filtering. But we can't turn it off...
+
         sensor
             .init()
             .map_err(|e| failure::err_msg(format!("unable to init: {:?}", e)))?;
@@ -57,9 +70,18 @@ impl BME280 {
         let thread_inner = inner.clone();
 
         let readout_interval = config.readout_interval_seconds;
+        let reset_every_n_readouts = config.reset_every_n_readouts;
         thread::Builder::new()
             .name(format!("BME280 {}", alias))
-            .spawn(move || BME280::run(thread_inner, sensor, readout_interval, alias))?;
+            .spawn(move || {
+                BME280::run(
+                    thread_inner,
+                    sensor,
+                    readout_interval,
+                    alias,
+                    reset_every_n_readouts,
+                )
+            })?;
 
         Ok(BME280 { inner })
     }
@@ -69,6 +91,7 @@ impl BME280 {
         mut dev: bme280::BME280<I2C, linux_embedded_hal::Delay>,
         readout_interval_secs: u8,
         alias: String,
+        reset_every_n_readouts: Option<u16>,
     ) where
         I2C: hal::blocking::i2c::Write<Error = E>
             + Send
@@ -94,25 +117,94 @@ impl BME280 {
         let unsupported_chip_counter =
             prom::BME280_MEASUREMENTS.with_label_values(&[alias.as_str(), "unsupported_chip"]);
 
+        // Keep track of the last pressure we read.
+        // In case there is a massive jump, we reset the chip.
+        let mut last_pressure = None;
+
         // De-sync in case we have multiple of these.
         let millis = rand::thread_rng().gen_range(0..1000);
         debug!("will sleep {}ms to de-sync", millis);
         thread::sleep(Duration::from_millis(millis));
 
+        let mut readout_count = 0_u32;
         loop {
             // Read sensor.
-            BME280::read_sensor(
+            let res = BME280::read_sensor(
                 &alias,
                 &mut dev,
+                &mut last_pressure,
                 &core,
-                &ok_counter,
-                &compensation_error_counter,
-                &i2c_error_counter,
-                &invalid_data_error_counter,
-                &no_calibration_error_counter,
-                &unsupported_chip_counter,
                 &readout_duration_histogram,
             );
+
+            match res {
+                Ok(_) => {
+                    readout_count += 1;
+                    ok_counter.inc();
+
+                    if let Some(reset_every_n_readouts) = &reset_every_n_readouts {
+                        let reset_counter = *reset_every_n_readouts as u32;
+
+                        if readout_count >= reset_counter {
+                            debug!("attempting to reset BME {}", alias);
+                            match dev.init() {
+                                Ok(_) => {
+                                    debug!("successfully reset BME {}", alias);
+                                    readout_count = 0;
+                                }
+                                Err(e) => {
+                                    warn!(
+                                        "unable to reset BME {}, retrying next time: {:?}",
+                                        alias, e
+                                    );
+                                    // Do not reset readout_count, retry next time.
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(err) => {
+                    match err {
+                        ReadoutError::SuspiciousValue { pressure_diff } => {
+                            warn!("{}: pressure difference since last measurement is {}, exceeds threshold of {}, resetting device",alias,pressure_diff,DEVICE_RESET_PRESSURE_DIFF);
+                            loop {
+                                match dev.init() {
+                                    Ok(_) => {
+                                        debug!("successfully reset BME {}", alias);
+                                        break;
+                                    }
+                                    Err(e) => {
+                                        warn!(
+                                            "unable to reset BME {}, trying again: {:?}",
+                                            alias, e
+                                        );
+                                    }
+                                }
+                            }
+
+                            // Retry reading the sensor.
+                            continue;
+                        }
+                        ReadoutError::Readout(err) => match err {
+                            bme280::Error::CompensationFailed => {
+                                compensation_error_counter.inc();
+                            }
+                            bme280::Error::I2c(_) => {
+                                i2c_error_counter.inc();
+                            }
+                            bme280::Error::InvalidData => {
+                                invalid_data_error_counter.inc();
+                            }
+                            bme280::Error::NoCalibrationData => {
+                                no_calibration_error_counter.inc();
+                            }
+                            bme280::Error::UnsupportedChip => {
+                                unsupported_chip_counter.inc();
+                            }
+                        },
+                    }
+                }
+            }
 
             // Sleep afterwards (so we get a fresh reading when the program starts).
             thread::sleep(readout_interval);
@@ -122,15 +214,11 @@ impl BME280 {
     fn read_sensor<I2C, E>(
         alias: &str,
         dev: &mut bme280::BME280<I2C, linux_embedded_hal::Delay>,
+        last_pressure: &mut Option<f32>,
         core: &SynchronizedDeviceReadCore,
-        ok_counter: &GenericCounter<AtomicI64>,
-        compensation_error_counter: &GenericCounter<AtomicI64>,
-        i2c_error_counter: &GenericCounter<AtomicI64>,
-        invalid_data_error_counter: &GenericCounter<AtomicI64>,
-        no_calibration_error_counter: &GenericCounter<AtomicI64>,
-        unsupported_chip_counter: &GenericCounter<AtomicI64>,
         readout_duration_histogram: &Histogram,
-    ) where
+    ) -> std::result::Result<(), ReadoutError<E>>
+    where
         I2C: hal::blocking::i2c::Write<Error = E>
             + Send
             + hal::blocking::i2c::Read<Error = E>
@@ -149,6 +237,24 @@ impl BME280 {
 
         match res {
             Ok(readings) => {
+                debug!("got measurements from device {}: {:?}", alias, readings);
+                if let Some(last_pressure) = last_pressure.take() {
+                    let diff = (readings.pressure - last_pressure).abs();
+                    debug!(
+                        "{}: last pressure was {}, absolute diff is {}",
+                        alias, last_pressure, diff
+                    );
+                    if diff >= DEVICE_RESET_PRESSURE_DIFF {
+                        // last_pressure is None, since we called take above.
+                        return Err(ReadoutError::SuspiciousValue {
+                            pressure_diff: diff,
+                        });
+                    }
+                } else {
+                    debug!("{}: no last pressure value", alias);
+                }
+                *last_pressure = Some(readings.pressure);
+
                 debug!(
                     "got valid measurements from device {}: {:?}",
                     alias, readings
@@ -174,7 +280,7 @@ impl BME280 {
                     );
                 }
 
-                ok_counter.inc();
+                Ok(())
             }
             Err(err) => {
                 warn!("unable to read BME280 {}: {:?}", alias, err);
@@ -185,23 +291,7 @@ impl BME280 {
                     core.set_error_on_all_ports(ts, msg)
                 }
 
-                match err {
-                    bme280::Error::CompensationFailed => {
-                        compensation_error_counter.inc();
-                    }
-                    bme280::Error::I2c(_) => {
-                        i2c_error_counter.inc();
-                    }
-                    bme280::Error::InvalidData => {
-                        invalid_data_error_counter.inc();
-                    }
-                    bme280::Error::NoCalibrationData => {
-                        no_calibration_error_counter.inc();
-                    }
-                    bme280::Error::UnsupportedChip => {
-                        unsupported_chip_counter.inc();
-                    }
-                }
+                Err(ReadoutError::Readout(err))
             }
         }
     }

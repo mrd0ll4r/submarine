@@ -6,6 +6,7 @@ devices:
       i2c_bus: "/dev/i2c-4"
       i2c_slave_address: 0x76
       readout_interval_seconds: 1
+      reset_every_n_readouts: 3600
     inputs:
       - port: 0
         alias: bme-outside-kitchen-temp
@@ -24,6 +25,7 @@ devices:
       i2c_bus: "/dev/i2c-5"
       i2c_slave_address: 0x76
       readout_interval_seconds: 1
+      reset_every_n_readouts: 3600
     inputs:
       - port: 0
         alias: bme-zuluft-temp

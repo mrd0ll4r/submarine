@@ -5,7 +5,7 @@ devices:
     config:
       i2c_bus: "/dev/i2c-1"
       i2c_slave_address: 0x3d
-      readout_interval_seconds: 3
+      readout_interval_seconds: 5
       power_cycle_every_n_readouts: 600
       power_cycle_power_off_seconds: 5
     inputs:
@@ -52,17 +52,17 @@ devices:
         tags: [ "humidity" ]
 
       - port: 12
-        #alias: dht-1-temp
+        alias: dht-abluft-temp
         tags: [ "temp" ]
       - port: 13
-        #alias: dht-1-humidity
+        alias: dht-abluft-humidity
         tags: [ "humidity" ]
 
       - port: 14
-        #alias: dht-1-temp
+        alias: dht-frischluft-2-temp
         tags: [ "temp" ]
       - port: 15
-        #alias: dht-1-humidity
+        alias: dht-frischluft-2-humidity
         tags: [ "humidity" ]
 
       - port: 16

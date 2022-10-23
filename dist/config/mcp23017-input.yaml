@@ -6,7 +6,7 @@ devices:
       i2c_bus: "/dev/i2c-1"
       i2c_slave_address: 33
       polling_interval_millis: 5
-      enable_pullups: false
+      enable_pullups: true
       invert: false
     inputs:
       - port: 0

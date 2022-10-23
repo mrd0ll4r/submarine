@@ -1,4 +1,5 @@
 devices:
+  # Auslass im Hauptraum neben dem Klo
   - type: ds18
     alias: ds18b20-auslass-hauptraum-klo
     tags: [ "ds18b20", "hauptraum" ]
@@ -9,6 +10,7 @@ devices:
       - port: 0
         alias: "ds18b20-auslass-hauptraum-klo-temp"
         tags: [ "temp" ]
+  # Warumluft direkt hinter der Heizung
   - type: ds18
     alias: ds18b20-warmluft
     tags: [ "ds18b20", "basement", "warmluft" ]
@@ -18,4 +20,15 @@ devices:
     inputs:
       - port: 0
         alias: "ds18b20-warmluft-temp"
+        tags: [ "temp" ]
+  # Im Klo, mittlere Höhe
+  - type: ds18
+    alias: ds18b20-klo
+    tags: [ "ds18b20", "klo" ]
+    config:
+      id: "28-3c01d0757acd"
+      readout_interval_seconds: 2
+    inputs:
+      - port: 0
+        alias: "ds18b20-klo-temp"
         tags: [ "temp" ]

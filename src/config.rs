@@ -116,7 +116,6 @@ pub(crate) struct ProgramConfig {
     pub(crate) tcp_server_listen_address: String,
     pub(crate) prometheus_listen_address: String,
     pub(crate) device_configs: Option<Vec<String>>,
-    pub(crate) log_to_file: bool,
 }
 
 impl Default for ProgramConfig {
@@ -125,7 +124,6 @@ impl Default for ProgramConfig {
             tcp_server_listen_address: "localhost:3030".to_string(),
             prometheus_listen_address: "0.0.0.0:6969".to_string(),
             device_configs: None,
-            log_to_file: true,
         }
     }
 }

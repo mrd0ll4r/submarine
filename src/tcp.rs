@@ -108,7 +108,7 @@ impl Client {
                                     "event_filter {}/{}: lagged {} events",
                                     remote, address, count
                                 );
-                                events_dropped.inc_by(count as i64);
+                                events_dropped.inc_by(count);
                                 continue;
                             }
                         },

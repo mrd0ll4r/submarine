@@ -4,7 +4,7 @@ use crate::{dht22_lib, poll, prom, Result};
 use alloy::config::{InputValue, InputValueType};
 use embedded_hal as hal;
 use failure::err_msg;
-use prometheus::core::{AtomicI64, GenericCounter};
+use prometheus::core::{AtomicU64, GenericCounter};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::thread;
@@ -329,11 +329,11 @@ impl DHT22Expander {
     fn handle_results(
         inner: &mut SynchronizedDeviceReadCore,
         readings: [std::result::Result<dht22_lib::Reading, ExpanderSensorError>; 16],
-        ok_counter: &GenericCounter<AtomicI64>,
-        checksum_error_counter: &GenericCounter<AtomicI64>,
-        timeout_error_counter: &GenericCounter<AtomicI64>,
-        suspicious_value_counter: &GenericCounter<AtomicI64>,
-        no_start_condition_counter: &GenericCounter<AtomicI64>,
+        ok_counter: &GenericCounter<AtomicU64>,
+        checksum_error_counter: &GenericCounter<AtomicU64>,
+        timeout_error_counter: &GenericCounter<AtomicU64>,
+        suspicious_value_counter: &GenericCounter<AtomicU64>,
+        no_start_condition_counter: &GenericCounter<AtomicU64>,
         alias: &str,
     ) {
         let ts = chrono::Utc::now();

@@ -4,7 +4,7 @@ use crate::dht22_lib::ReadingError;
 use crate::{dht22_lib, prom, Result};
 use alloy::config::{InputValue, InputValueType};
 use failure::{err_msg, ResultExt};
-use prometheus::core::{AtomicI64, GenericCounter};
+use prometheus::core::{AtomicU64, GenericCounter};
 use rand::Rng;
 use rppal::gpio;
 use rppal::gpio::{Gpio, IoPin, Mode};
@@ -113,11 +113,11 @@ impl DHT22 {
         pin: &mut IoPin,
         adjust_priority: bool,
         use_experimental_implementation: bool,
-        ok_counter: &GenericCounter<AtomicI64>,
-        checksum_error_counter: &GenericCounter<AtomicI64>,
-        timeout_error_counter: &GenericCounter<AtomicI64>,
-        gpio_error_counter: &GenericCounter<AtomicI64>,
-        suspicious_value_counter: &GenericCounter<AtomicI64>,
+        ok_counter: &GenericCounter<AtomicU64>,
+        checksum_error_counter: &GenericCounter<AtomicU64>,
+        timeout_error_counter: &GenericCounter<AtomicU64>,
+        gpio_error_counter: &GenericCounter<AtomicU64>,
+        suspicious_value_counter: &GenericCounter<AtomicU64>,
     ) {
         let readings = if use_experimental_implementation {
             dht22_lib::read_pin_2(pin, adjust_priority)

@@ -6,23 +6,23 @@ edition = "2018"
 
 [dependencies]
 # Core
-failure = {version="0.1", features=["std","backtrace"]}
+failure = { version = "0.1", features = ["std", "backtrace"] }
 failure_derive = "0.1.8"
-log = {version = "0.4", features = ["std","serde"]}
-flexi_logger = {version="0.16",features=["compress"]}
-itertools = "0.9"
+log = { version = "0.4", features = ["std", "serde"] }
+flexi_logger = { version = "0.24" }
+itertools = "0.10"
 rand = "0.8"
 #alloy = {git = "https://github.com/mrd0ll4r/alloy"}
-alloy = {path = "../alloy"}
+alloy = { path = "../alloy" }
 
 # Serde
-serde = {version="1",features=["derive"]}
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-serde_yaml = "0.8"
+serde_yaml = "0.9"
 
 # API/Tokio/TCP
 tokio = { version = "1", features = ["full"] }
-tokio-util = {version="0.6", features=["codec"]}
+tokio-util = { version = "0.7", features = ["codec"] }
 futures = "0.3"
 chrono = "0.4"
 
@@ -36,7 +36,7 @@ libc = "0.2"
 bme280 = "0.2.1"
 
 # Prometheus, metrics
-prometheus_exporter = "0.7.2"
-prometheus = {version="0.10.0",features=["process"]}
+prometheus_exporter = "0.8.5"
+prometheus = { version = "0.13", features = ["process"] }
 lazy_static = "1"
-systemstat = "0.1.10"
+systemstat = "0.2"

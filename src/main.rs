@@ -40,16 +40,11 @@ type Result<T> = std::result::Result<T, Error>;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // This will probably not logged, but meh...
+    logging::set_up_logging().expect("unable to set up logging");
+    info!("set up logging");
+
     info!("reading config...");
     let cfg = config::AggregatedConfig::read_recursively_from_file("config.yaml")?;
-
-    logging::set_up_logging(cfg.program.log_to_file).context("unable to set up logging")?;
-    info!(
-        "set up logging, logging to file? {}",
-        cfg.program.log_to_file
-    );
-
     debug!("loaded config: {:?}", cfg);
 
     info!("starting prometheus...");

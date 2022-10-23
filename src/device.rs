@@ -17,7 +17,7 @@ use failure::{err_msg, format_err, ResultExt};
 use futures::{Stream, StreamExt};
 use itertools::Itertools;
 use linux_embedded_hal as linux_hal;
-use prometheus::core::{AtomicF64, AtomicI64, GenericCounter, GenericGauge};
+use prometheus::core::{AtomicF64, AtomicU64, GenericCounter, GenericGauge};
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
@@ -202,8 +202,8 @@ pub(crate) struct PortState {
 
     value_metric: GenericGauge<AtomicF64>,
     ok_metric: GenericGauge<AtomicF64>,
-    update_ok_counter: GenericCounter<AtomicI64>,
-    update_error_counter: GenericCounter<AtomicI64>,
+    update_ok_counter: GenericCounter<AtomicU64>,
+    update_error_counter: GenericCounter<AtomicU64>,
 }
 
 impl PortState {

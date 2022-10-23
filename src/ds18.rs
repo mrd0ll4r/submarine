@@ -4,7 +4,7 @@ use crate::prom;
 use crate::Result;
 use alloy::config::{InputValue, InputValueType};
 use failure::ResultExt;
-use prometheus::core::{AtomicI64, GenericCounter};
+use prometheus::core::{AtomicU64, GenericCounter};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -61,7 +61,7 @@ impl DS18 {
     fn update_async(
         alias: String,
         id: String,
-        p: std::path::PathBuf,
+        p: PathBuf,
         core: SynchronizedDeviceReadCore,
         readout_interval: Duration,
     ) {
@@ -97,9 +97,9 @@ impl DS18 {
         id: &str,
         p: &PathBuf,
         core: &SynchronizedDeviceReadCore,
-        ok_counter: &GenericCounter<AtomicI64>,
-        error_counter: &GenericCounter<AtomicI64>,
-        conversion_error_counter: &GenericCounter<AtomicI64>,
+        ok_counter: &GenericCounter<AtomicU64>,
+        error_counter: &GenericCounter<AtomicU64>,
+        conversion_error_counter: &GenericCounter<AtomicU64>,
     ) {
         let res = std::fs::read(&p);
 

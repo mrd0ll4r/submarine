@@ -14,35 +14,35 @@ devices:
         alias: servo-1
         tags: [ "servo" ]
         scaling:
-          linear:
+          !linear
             from: 4000
             to: 7500
       - port: 1
         alias: servo-2
         tags: [ "servo" ]
         scaling:
-          linear:
+          !linear
             from: 6000
             to: 3500
       - port: 2
         alias: servo-3
         tags: [ "servo" ]
         scaling:
-          linear:
+          !linear
             from: 6500
             to: 4300
       - port: 3
         alias: servo-4
         tags: [ "servo" ]
         scaling:
-          linear:
+          !linear
             from: 3400
             to: 7000
       - port: 4
         alias: servo-5
         tags: [ "servo" ]
         scaling:
-          linear:
+          !linear
             from: 3500
             to: 6500
   - type: pca9685_synchronized
@@ -149,6 +149,6 @@ devices:
         alias: kitchen-spots
         tags: [ "kitchen", "spots" ]
         scaling:
-          linear:
+          !linear
             from: 0
             to: 35000

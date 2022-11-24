@@ -52,18 +52,18 @@ devices:
         tags: [ "humidity" ]
 
       - port: 12
-        alias: dht-abluft-temp
+        #alias: dht-6-temp
         tags: [ "temp" ]
       - port: 13
-        alias: dht-abluft-humidity
+        #alias: dht-6-humidity
         tags: [ "humidity" ]
 
       - port: 14
-        alias: dht-frischluft-2-temp
-        tags: [ "temp" ]
+        alias: dht-kitchen-sink-temp
+        tags: [ "temp", "kitchen" ]
       - port: 15
-        alias: dht-frischluft-2-humidity
-        tags: [ "humidity" ]
+        alias: dht-kitchen-sink-humidity
+        tags: [ "humidity", "kitchen" ]
 
       - port: 16
         alias: am-keller-schrank-temp
@@ -94,17 +94,17 @@ devices:
         tags: [ "humidity", "outside" ]
 
       - port: 24
-        alias: dht-kitchen-temp
-        tags: [ "temp", "kitchen" ]
+        alias: dht-abluft-temp
+        tags: [ "temp" ]
       - port: 25
-        alias: dht-kitchen-humidity
-        tags: [ "humidity", "kitchen" ]
+        alias: dht-abluft-humidity
+        tags: [ "humidity" ]
 
       - port: 26
-        #alias: dht-1-temp
+        alias: dht-frischluft-2-temp
         tags: [ "temp" ]
       - port: 27
-        #alias: dht-1-humidity
+        alias: dht-frischluft-2-humidity
         tags: [ "humidity" ]
 
       - port: 28

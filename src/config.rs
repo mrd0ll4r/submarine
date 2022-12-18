@@ -2,6 +2,7 @@ use crate::bme280::BME280Config;
 use crate::dht22::DHT22Config;
 use crate::dht22_expander::DHT22ExpanderConfig;
 use crate::ds18::DS18Config;
+use crate::fan_heater::FanHeaterConfig;
 use crate::gpio::GpioConfig;
 use crate::mcp23017::MCP23017Config;
 use crate::mcp23017_input::MCP23017InputConfig;
@@ -204,4 +205,6 @@ pub(crate) enum HardwareDeviceConfig {
     DHT22Expander { config: DHT22ExpanderConfig },
     #[serde(rename = "gpio")]
     Gpio { config: GpioConfig },
+    #[serde(rename = "fan_heater")]
+    FanHeater { config: FanHeaterConfig },
 }

@@ -25,6 +25,7 @@ mod dht22;
 mod dht22_expander;
 mod dht22_lib;
 mod ds18;
+mod fan_heater;
 mod gpio;
 mod i2c_mock;
 mod logging;

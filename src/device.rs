@@ -7,9 +7,9 @@ use crate::ds18::DS18;
 use crate::gpio::Gpio;
 use crate::pca9685::PCA9685Config;
 use crate::pca9685_sync::PCA9685Synchronized;
-use crate::prom;
 use crate::Result;
 use crate::{config, i2c_mock, mcp23017, mcp23017_input, pca9685};
+use crate::{fan_heater, prom};
 use alloy::config::{InputValue, InputValueType};
 use alloy::event::{AddressedEvent, Event, EventKind};
 use alloy::{Address, OutputValue};
@@ -134,6 +134,7 @@ pub(crate) enum DeviceType {
     MCP23017(Box<dyn OutputHardwareDevice>),
     BME280(Box<dyn InputHardwareDevice>),
     Gpio(Box<dyn InputHardwareDevice>),
+    FanHeater(Box<dyn InputHardwareDevice>, Box<dyn OutputHardwareDevice>),
 }
 
 impl Debug for DeviceType {
@@ -153,6 +154,7 @@ impl DeviceType {
             DeviceType::MCP23017(_) => alloy::config::DeviceType::MCP23017,
             DeviceType::BME280(_) => alloy::config::DeviceType::BME280,
             DeviceType::Gpio(_) => alloy::config::DeviceType::GPIO,
+            DeviceType::FanHeater(_, _) => alloy::config::DeviceType::FanHeater,
         }
     }
 }
@@ -308,12 +310,9 @@ impl UniverseState {
                 | DeviceType::MCP23017Input(_)
                 | DeviceType::BME280(_)
                 | DeviceType::Gpio(_) => {}
-                DeviceType::PCA9685(dev) => {
-                    if let Err(e) = dev.update() {
-                        error!("unable to update output device {}: {:?}", &device.alias, e)
-                    }
-                }
-                DeviceType::MCP23017(dev) => {
+                DeviceType::PCA9685(dev)
+                | DeviceType::MCP23017(dev)
+                | DeviceType::FanHeater(_, dev) => {
                     if let Err(e) = dev.update() {
                         error!("unable to update output device {}: {:?}", &device.alias, e)
                     }
@@ -419,6 +418,38 @@ impl UniverseState {
                         &mut addressed_output_ports,
                         &mut event_broadcasters,
                         &device_config,
+                        &device_alias,
+                        &mut output_ports,
+                        output_dev,
+                    )
+                    .await
+                    .context("unable to map output ports")?
+                }
+                DeviceType::FanHeater(input_dev, output_dev) => {
+                    // Supports both input and output ports
+                    let mut cfg_only_inputs = device_config.clone();
+                    cfg_only_inputs.outputs = None;
+                    let mut cfg_only_outputs = device_config.clone();
+                    cfg_only_outputs.inputs = None;
+
+                    UniverseState::create_input_port_mappings(
+                        &mut aliases,
+                        &mut address_counter,
+                        &mut event_broadcasters,
+                        &cfg_only_inputs,
+                        &device_alias,
+                        &mut input_ports,
+                        input_dev,
+                    )
+                    .await
+                    .context("unable to map input ports")?;
+
+                    UniverseState::create_output_port_mappings(
+                        &mut aliases,
+                        &mut address_counter,
+                        &mut addressed_output_ports,
+                        &mut event_broadcasters,
+                        &cfg_only_outputs,
                         &device_alias,
                         &mut output_ports,
                         output_dev,
@@ -736,6 +767,19 @@ impl UniverseState {
         alias: String,
     ) -> Result<DeviceType> {
         let dev = match &device_config.hardware_device_config {
+            config::HardwareDeviceConfig::FanHeater { config: cfg } => {
+                debug!("creating FanHeater combo {}...", alias);
+                let dev = if cfg.i2c_bus.is_empty() {
+                    warn!("using I2C mock");
+                    let i2c = i2c_mock::I2cMock::new();
+                    fan_heater::FanHeater::new(i2c, alias, cfg)?
+                } else {
+                    debug!("using I2C at {}", cfg.i2c_bus);
+                    let i2c = linux_hal::I2cdev::new(cfg.i2c_bus.clone())?;
+                    fan_heater::FanHeater::new(i2c, alias, cfg)?
+                };
+                DeviceType::FanHeater(Box::new(dev.clone()), Box::new(dev))
+            }
             config::HardwareDeviceConfig::PCA9685 { config: cfg } => {
                 debug!("creating PCA9685 {}...", alias);
                 let dev = if cfg.i2c_bus.is_empty() {

@@ -118,6 +118,19 @@ lazy_static! {
         &["alias", "result"]
     )
     .unwrap();
+    pub static ref BUTTON_EXPANDER_READ_DURATION: HistogramVec = register_histogram_vec!(
+        "button_expander_read_duration",
+        "duration of reading from a button expander in microseconds by alias",
+        &["alias"],
+        exponential_buckets(150_f64, (1.5_f64).sqrt(), 10).unwrap()
+    )
+    .unwrap();
+    pub static ref BUTTON_EXPANDER_READS: IntCounterVec = register_int_counter_vec!(
+        "button_expander_reads",
+        "reads performed for button expanders by alias and result",
+        &["alias", "result"]
+    )
+    .unwrap();
 }
 
 // Event-related metrics.

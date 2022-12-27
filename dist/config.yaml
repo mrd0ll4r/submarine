@@ -4,7 +4,7 @@ submarine:
   log_to_file: true
   device_configs: [ "config/pca9685.yaml",
                     "config/dht22.yaml",
-                    "config/mcp23017-input.yaml",
+                    "config/button_expander.yaml",
                     "config/bme280.yaml",
                     "config/ds18.yaml",
                     "config/mcp23017.yaml",

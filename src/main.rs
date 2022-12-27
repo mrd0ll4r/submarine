@@ -18,6 +18,7 @@ use std::sync::Arc;
 use tokio::task;
 
 mod bme280;
+mod button_expander;
 mod config;
 mod device;
 mod device_core;

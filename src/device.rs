@@ -135,6 +135,7 @@ pub(crate) enum DeviceType {
     BME280(Box<dyn InputHardwareDevice>),
     Gpio(Box<dyn InputHardwareDevice>),
     FanHeater(Box<dyn InputHardwareDevice>, Box<dyn OutputHardwareDevice>),
+    ButtonExpander(Box<dyn InputHardwareDevice>),
 }
 
 impl Debug for DeviceType {
@@ -155,6 +156,7 @@ impl DeviceType {
             DeviceType::BME280(_) => alloy::config::DeviceType::BME280,
             DeviceType::Gpio(_) => alloy::config::DeviceType::GPIO,
             DeviceType::FanHeater(_, _) => alloy::config::DeviceType::FanHeater,
+            DeviceType::ButtonExpander(_) => alloy::config::DeviceType::ButtonExpander,
         }
     }
 }
@@ -309,7 +311,8 @@ impl UniverseState {
                 | DeviceType::DS18(_)
                 | DeviceType::MCP23017Input(_)
                 | DeviceType::BME280(_)
-                | DeviceType::Gpio(_) => {}
+                | DeviceType::Gpio(_)
+                | DeviceType::ButtonExpander(_) => {}
                 DeviceType::PCA9685(dev)
                 | DeviceType::MCP23017(dev)
                 | DeviceType::FanHeater(_, dev) => {
@@ -400,17 +403,20 @@ impl UniverseState {
                 | DeviceType::DS18(input_dev)
                 | DeviceType::MCP23017Input(input_dev)
                 | DeviceType::BME280(input_dev)
-                | DeviceType::Gpio(input_dev) => UniverseState::create_input_port_mappings(
-                    &mut aliases,
-                    &mut address_counter,
-                    &mut event_broadcasters,
-                    &device_config,
-                    &device_alias,
-                    &mut input_ports,
-                    input_dev,
-                )
-                .await
-                .context("unable to map input ports")?,
+                | DeviceType::Gpio(input_dev)
+                | DeviceType::ButtonExpander(input_dev) => {
+                    UniverseState::create_input_port_mappings(
+                        &mut aliases,
+                        &mut address_counter,
+                        &mut event_broadcasters,
+                        &device_config,
+                        &device_alias,
+                        &mut input_ports,
+                        input_dev,
+                    )
+                    .await
+                    .context("unable to map input ports")?
+                }
                 DeviceType::MCP23017(output_dev) | DeviceType::PCA9685(output_dev) => {
                     UniverseState::create_output_port_mappings(
                         &mut aliases,
@@ -884,6 +890,20 @@ impl UniverseState {
                     crate::dht22_expander::DHT22Expander::new(i2c, alias, config)?
                 };
                 DeviceType::DHT22Expander(Box::new(dev))
+            }
+            HardwareDeviceConfig::ButtonExpander { config } => {
+                debug!("creating button expander {}...", alias);
+
+                let dev = if config.i2c_bus.is_empty() {
+                    warn!("using I2C mock");
+                    let i2c = i2c_mock::I2cMock::new();
+                    crate::button_expander::ButtonExpanderBoard::new(i2c, config, alias)?
+                } else {
+                    debug!("using I2C at {}", config.i2c_bus);
+                    let i2c = linux_hal::I2cdev::new(config.i2c_bus.clone())?;
+                    crate::button_expander::ButtonExpanderBoard::new(i2c, config, alias)?
+                };
+                DeviceType::ButtonExpander(Box::new(dev))
             }
         };
 

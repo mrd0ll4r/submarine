@@ -12,9 +12,11 @@ devices:
       - port: 1
         alias: outlet-5-s
         tags: [ "outlet", "relais", "R2" ]
+        default: 65535
       - port: 2
         alias: outlet-6-s
         tags: [ "outlet", "relais", "R2" ]
+        default: 65535
       - port: 5
         alias: outlet-8-s2
         tags: [ "outlet", "relais", "R2" ]
@@ -23,9 +25,11 @@ devices:
       - port: 6
         alias: outlet-3-s
         tags: [ "outlet", "relais", "R1" ]
+        default: 65535
       - port: 7
         alias: outlet-1-s
         tags: [ "outlet", "relais", "R1" ]
+        default: 65535
       - port: 8
         alias: outlet-2-s1
         tags: [ "outlet", "relais", "R1" ]
@@ -46,8 +50,8 @@ devices:
       i2c_slave_address: 34
     outputs:
       - port: 0
-        alias: relais-r3-0
-        tags: [ "relais", "R3" ]
+        alias: uv-hauptraum
+        tags: [ "hauptraum", "uv", "light", "relais", "R3" ]
       - port: 1
         alias: putzlicht-front
         tags: [ "putzlicht", "outside", "front", "relais", "R3" ]
@@ -64,3 +68,22 @@ devices:
         alias: outlet-9-s
         tags: [ "outlet", "relais", "R3" ]
         default: 65535
+
+      - port: 8
+        alias: r4-0
+        tags: [ "relais" , "R4" ]
+      - port: 9
+        alias: r4-1
+        tags: [ "relais" , "R4" ]
+      - port: 10
+        alias: r4-2
+        tags: [ "relais" , "R4" ]
+      - port: 11
+        alias: r4-3
+        tags: [ "relais" , "R4" ]
+      - port: 12
+        alias: red-green-party-light
+        tags: [ "relais" , "light", "hauptraum", "R4" ]
+      - port: 13
+        alias: r4-5
+        tags: [ "relais" , "R4" ]

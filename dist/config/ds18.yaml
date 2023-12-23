@@ -21,14 +21,14 @@ devices:
       - port: 0
         alias: "ds18b20-warmluft-temp"
         tags: [ "temp" ]
-  # Im Klo, mittlere Höhe
+  # Irgendwo in der Erde Richtung Lufteinlass
   - type: ds18
-    alias: ds18b20-klo
-    tags: [ "ds18b20", "klo" ]
+    alias: ds18b20-erde
+    tags: [ "ds18b20", "outside", "ground" ]
     config:
       id: "28-3c01d0757acd"
       readout_interval_seconds: 2
     inputs:
       - port: 0
-        alias: "ds18b20-klo-temp"
+        alias: "ds18b20-erde-temp"
         tags: [ "temp" ]

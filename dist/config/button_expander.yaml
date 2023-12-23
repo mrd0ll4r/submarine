@@ -5,7 +5,7 @@ devices:
     config:
       i2c_bus: "/dev/i2c-1"
       i2c_slave_address: 0x3e
-      polling_interval_millis: 5
+      polling_interval_millis: 10
     inputs:
       - port: 0
         alias: button-bedroom-left

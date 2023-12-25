@@ -9,10 +9,10 @@ extern crate prometheus;
 use crate::device::UniverseState;
 use alloy::amqp;
 use anyhow::Context;
-use futures::lock::Mutex;
 use log::{debug, info};
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use tokio::task;
 
 mod bme280;
@@ -26,6 +26,7 @@ mod dht22_lib;
 mod ds18;
 mod fan_heater;
 mod gpio;
+mod http;
 mod i2c_mock;
 mod logging;
 mod mcp23017;
@@ -71,13 +72,20 @@ async fn main() -> Result<()> {
     info!("starting TCP server...");
     let tcp_server_address = cfg.program.tcp_server_listen_address.parse()?;
     let tcp_server = task::spawn(tcp::run_server(tcp_server_address, state.clone()));
-
     info!(
         "TCP server is listening on tcp://{}",
         cfg.program.tcp_server_listen_address
     );
 
-    tcp_server.await??;
+    info!("starting HTTP server...");
+    let http_server_address = cfg.program.http_server_listen_address.parse()?;
+    let http_server = task::spawn(http::run_server(http_server_address, state.clone()));
+    info!("HTTP server is listening on http://{}", http_server_address);
+
+    tokio::select! {
+        _ = tcp_server => {}
+        _ = http_server => {}
+    }
 
     Ok(())
 }

@@ -8,13 +8,13 @@ use crate::gpio::Gpio;
 use crate::pca9685::PCA9685Config;
 use crate::pca9685_sync::PCA9685Synchronized;
 use crate::Result;
-use crate::{config, i2c_mock, mcp23017, mcp23017_input, pca9685};
 use crate::{fan_heater, prom};
+use crate::{i2c_mock, mcp23017, mcp23017_input, pca9685};
 use alloy::amqp::{
     ExchangeSubmarineInput, ExchangeSubmarineInputPublisher, SubmarineInputRoutingKey,
 };
 use alloy::config::{InputValue, InputValueType};
-use alloy::event::{AddressedEvent, Event, EventKind};
+use alloy::event::{AddressedEvent, Event, EventKind, TimestampedInputValue};
 use alloy::{Address, OutputValue};
 use anyhow::{anyhow, ensure, Context};
 use futures::{Stream, StreamExt};
@@ -72,10 +72,10 @@ pub(crate) trait OutputPort: Send {
 }
 
 pub(crate) struct UniverseState {
-    version: tokio::sync::Mutex<Cell<u64>>,
+    version: Mutex<Cell<u64>>,
     devices: Vec<HardwareDeviceState>,
 
-    output_ports: HashMap<Address, Arc<tokio::sync::Mutex<Box<dyn OutputPort>>>>,
+    output_ports: HashMap<Address, Arc<Mutex<Box<dyn OutputPort>>>>,
 
     event_streams: HashMap<Address, Arc<tokio::sync::broadcast::Sender<AddressedEvent>>>,
 }
@@ -127,6 +127,28 @@ impl UniverseState {
 
         events
     }
+
+    pub(crate) async fn get_all_last_values(
+        &self,
+    ) -> HashMap<String, Option<TimestampedInputValue>> {
+        let mut values = HashMap::new();
+        for dev in self.devices.iter() {
+            for p in dev.input_ports.iter() {
+                let addr = p.port.alias.clone();
+                let val = p.port.last_value.lock().await.clone();
+
+                values.insert(addr, val);
+            }
+            for p in dev.output_ports.iter() {
+                let addr = p.port.alias.clone();
+                let val = p.port.last_value.lock().await.clone();
+
+                values.insert(addr, val);
+            }
+        }
+
+        values
+    }
 }
 
 pub(crate) enum DeviceType {
@@ -171,7 +193,7 @@ impl DeviceType {
 pub(crate) struct HardwareDeviceState {
     alias: String,
     tags: HashSet<String>,
-    device_type: tokio::sync::Mutex<DeviceType>,
+    device_type: Mutex<DeviceType>,
 
     input_ports: Vec<InputPortState>,
     output_ports: Vec<OutputPortState>,
@@ -194,12 +216,6 @@ impl HardwareDeviceState {
                 .collect(),
         }
     }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct TimestampedInputValue {
-    ts: chrono::DateTime<chrono::Utc>,
-    value: std::result::Result<InputValue, String>,
 }
 
 #[derive(Debug)]
@@ -285,7 +301,7 @@ impl InputPortState {
 pub(crate) struct OutputPortState {
     port: Arc<PortState>,
 
-    dev: Arc<tokio::sync::Mutex<Box<dyn OutputPort>>>,
+    dev: Arc<Mutex<Box<dyn OutputPort>>>,
 }
 
 impl Debug for OutputPortState {
@@ -472,7 +488,7 @@ impl UniverseState {
     async fn create_output_port_mappings(
         aliases: &mut HashSet<String>,
         address_counter: &mut u16,
-        addressed_output_ports: &mut HashMap<Address, Arc<tokio::sync::Mutex<Box<dyn OutputPort>>>>,
+        addressed_output_ports: &mut HashMap<Address, Arc<Mutex<Box<dyn OutputPort>>>>,
         event_broadcasters: &mut HashMap<
             Address,
             Arc<tokio::sync::broadcast::Sender<AddressedEvent>>,
@@ -558,7 +574,7 @@ impl UniverseState {
 
             let output_port_state = OutputPortState {
                 port,
-                dev: Arc::new(tokio::sync::Mutex::new(output_port)),
+                dev: Arc::new(Mutex::new(output_port)),
             };
 
             addressed_output_ports.insert(address, output_port_state.dev.clone());
@@ -585,7 +601,7 @@ impl UniverseState {
                 // Update port value
                 match event.inner.clone() {
                     Ok(ek) => {
-                        if let alloy::event::EventKind::Update { new_value } = ek {
+                        if let EventKind::Update { new_value } = ek {
                             port.update_last_value(event.timestamp, Ok(new_value)).await
                         }
                     }
@@ -782,7 +798,7 @@ impl UniverseState {
         alias: String,
     ) -> Result<DeviceType> {
         let dev = match &device_config.hardware_device_config {
-            config::HardwareDeviceConfig::FanHeater { config: cfg } => {
+            HardwareDeviceConfig::FanHeater { config: cfg } => {
                 debug!("creating FanHeater combo {}...", alias);
                 let dev = if cfg.i2c_bus.is_empty() {
                     warn!("using I2C mock");
@@ -795,7 +811,7 @@ impl UniverseState {
                 };
                 DeviceType::FanHeater(Box::new(dev))
             }
-            config::HardwareDeviceConfig::PCA9685 { config: cfg } => {
+            HardwareDeviceConfig::PCA9685 { config: cfg } => {
                 debug!("creating PCA9685 {}...", alias);
                 let dev = if cfg.i2c_bus.is_empty() {
                     warn!("using I2C mock");
@@ -808,7 +824,7 @@ impl UniverseState {
                 };
                 DeviceType::PCA9685(Box::new(dev))
             }
-            config::HardwareDeviceConfig::PCA9685Synchronized { config: cfg } => {
+            HardwareDeviceConfig::PCA9685Synchronized { config: cfg } => {
                 debug!("creating synchronized PCA9685 {}...", alias);
                 let i2c_bus = cfg.i2c_bus.to_lowercase();
                 debug!("normalized I2C bus to {}", i2c_bus);
@@ -826,13 +842,13 @@ impl UniverseState {
 
                 DeviceType::PCA9685(Box::new(core))
             }
-            config::HardwareDeviceConfig::DS18 { config: cfg } => {
+            HardwareDeviceConfig::DS18 { config: cfg } => {
                 debug!("creating DS18 {}...", alias);
 
                 let dev = DS18::new(alias, cfg)?;
                 DeviceType::DS18(Box::new(dev))
             }
-            config::HardwareDeviceConfig::MCP23017 { config: cfg } => {
+            HardwareDeviceConfig::MCP23017 { config: cfg } => {
                 debug!("creating MCP23017 {}...", alias);
 
                 let dev = if cfg.i2c_bus.is_empty() {
@@ -846,7 +862,7 @@ impl UniverseState {
                 };
                 DeviceType::MCP23017(Box::new(dev))
             }
-            config::HardwareDeviceConfig::MCP23017Input { config: cfg } => {
+            HardwareDeviceConfig::MCP23017Input { config: cfg } => {
                 debug!("creating MCP23017Input {}...", alias);
 
                 let dev = if cfg.i2c_bus.is_empty() {
@@ -860,7 +876,7 @@ impl UniverseState {
                 };
                 DeviceType::MCP23017Input(Box::new(dev))
             }
-            config::HardwareDeviceConfig::BME280 { config: cfg } => {
+            HardwareDeviceConfig::BME280 { config: cfg } => {
                 debug!("creating BME280 {}...", alias);
 
                 let dev = if cfg.i2c_bus.is_empty() {
@@ -874,13 +890,13 @@ impl UniverseState {
                 };
                 DeviceType::BME280(Box::new(dev))
             }
-            config::HardwareDeviceConfig::DHT22 { config } => {
+            HardwareDeviceConfig::DHT22 { config } => {
                 debug!("creating DHT22 {}...", alias);
 
                 let dev = DHT22::new(alias, config).context("unable to create DHT22")?;
                 DeviceType::DHT22(Box::new(dev))
             }
-            config::HardwareDeviceConfig::Gpio { config } => {
+            HardwareDeviceConfig::Gpio { config } => {
                 debug!("creating GPIO {}...", alias);
 
                 let dev = Gpio::new(alias, config).context("unable to create GPIO")?;

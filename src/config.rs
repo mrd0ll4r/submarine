@@ -117,6 +117,7 @@ impl DeviceConfigFile {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub(crate) struct ProgramConfig {
     pub(crate) tcp_server_listen_address: String,
+    pub(crate) http_server_listen_address: String,
     pub(crate) prometheus_listen_address: String,
     pub(crate) amqp_server_address: String,
     pub(crate) device_configs: Option<Vec<String>>,
@@ -126,6 +127,7 @@ impl Default for ProgramConfig {
     fn default() -> Self {
         ProgramConfig {
             tcp_server_listen_address: "localhost:3030".to_string(),
+            http_server_listen_address: "localhost:3069".to_string(),
             prometheus_listen_address: "0.0.0.0:6969".to_string(),
             amqp_server_address: "amqp://localhost:5672/%2f".to_string(),
             device_configs: None,

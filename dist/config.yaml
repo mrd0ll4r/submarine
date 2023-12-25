@@ -1,5 +1,6 @@
 submarine:
   amqp_server_address: "amqp://127.0.0.1:5672/%2f"
+  http_server_listen_address: "0.0.0.0:3069"
   tcp_server_listen_address: "127.0.0.1:3030"
   prometheus_listen_address: "127.0.0.1:6969"
   log_to_file: true

@@ -6,7 +6,6 @@ use alloy::event::{AddressedEvent, EventFilter};
 use alloy::tcp::Connection;
 use alloy::Address;
 use anyhow::{anyhow, Context};
-use futures::lock::Mutex;
 use futures::{Stream, StreamExt};
 use itertools::Itertools;
 use log::{debug, error, info};
@@ -17,8 +16,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::Poll;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::broadcast;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::{broadcast, Mutex};
 use tokio::task;
 
 pub(crate) async fn run_server(addr: SocketAddr, state: Arc<Mutex<UniverseState>>) -> Result<()> {

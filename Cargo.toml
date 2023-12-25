@@ -25,6 +25,9 @@ tokio-util = { version = "0.7", features = ["codec"] }
 futures = "0.3"
 chrono = "0.4"
 
+# HTTP API
+warp = "0.3.6"
+
 # Hardware
 embedded-hal = "0.2"
 linux-embedded-hal = "0.3"

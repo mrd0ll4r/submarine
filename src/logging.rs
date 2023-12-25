@@ -5,7 +5,7 @@ fn log_format(
     w: &mut dyn std::io::Write,
     now: &mut DeferredNow,
     record: &Record,
-) -> std::result::Result<(), std::io::Error> {
+) -> Result<(), std::io::Error> {
     write!(
         w,
         "[{}] {} [{}] {}:{}: {}",
@@ -19,7 +19,7 @@ fn log_format(
     )
 }
 
-pub fn set_up_logging() -> std::result::Result<LoggerHandle, Box<dyn std::error::Error>> {
+pub fn set_up_logging() -> Result<LoggerHandle, Box<dyn std::error::Error>> {
     let logger = Logger::try_with_env_or_str("info")?
         .use_utc()
         .format(log_format);

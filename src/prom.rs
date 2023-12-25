@@ -1,4 +1,5 @@
 use crate::Result;
+use log::warn;
 use prometheus::exponential_buckets;
 use prometheus::{Gauge, GaugeVec, HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec};
 use std::net::SocketAddr;

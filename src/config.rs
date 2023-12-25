@@ -10,7 +10,8 @@ use crate::mcp23017_input::MCP23017InputConfig;
 use crate::pca9685::PCA9685Config;
 use crate::Result;
 use alloy::{OutputValue, HIGH, LOW};
-use failure::{err_msg, ResultExt};
+use anyhow::{anyhow, Context};
+use log::debug;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs;
@@ -53,7 +54,7 @@ impl AggregatedConfig {
             if let Some(d) = c.devices {
                 for dev in d {
                     if cfg.devices.iter().any(|ddev| ddev.alias == dev.alias) {
-                        return Err(err_msg(format!("duplicate device alias {}", dev.alias)));
+                        return Err(anyhow!("duplicate device alias {}", dev.alias));
                     }
                     cfg.devices.push(dev)
                 }
@@ -117,6 +118,7 @@ impl DeviceConfigFile {
 pub(crate) struct ProgramConfig {
     pub(crate) tcp_server_listen_address: String,
     pub(crate) prometheus_listen_address: String,
+    pub(crate) amqp_server_address: String,
     pub(crate) device_configs: Option<Vec<String>>,
 }
 
@@ -125,6 +127,7 @@ impl Default for ProgramConfig {
         ProgramConfig {
             tcp_server_listen_address: "localhost:3030".to_string(),
             prometheus_listen_address: "0.0.0.0:6969".to_string(),
+            amqp_server_address: "amqp://localhost:5672/%2f".to_string(),
             device_configs: None,
         }
     }

@@ -5,10 +5,12 @@ use crate::prom;
 use crate::{poll, Result};
 use alloy::config::{InputValue, InputValueType};
 use alloy::event::{ButtonEvent, Event, EventKind};
+use anyhow::{anyhow, ensure};
 use embedded_hal as hal;
-use failure::*;
+use log::{debug, trace, warn};
 use mcp23017 as mcpdev;
 use serde::{Deserialize, Serialize};
+use std::fmt::{Display, Formatter};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -25,16 +27,34 @@ pub struct MCP23017InputConfig {
     invert: bool,
 }
 
-#[derive(Fail, Debug)]
+#[derive(Debug)]
 enum MCPInputError<E>
 where
     E: Sync + Send + std::fmt::Debug + 'static,
 {
-    #[fail(display = "Suspicious all-one readout")]
+    /// A suspicious all-one readout.
     SuspiciousValue,
-    #[fail(display = "I2C error: {:?}", _0)]
+    /// An underlying I2C error.
     I2C(E),
 }
+
+impl<E> Display for MCPInputError<E>
+where
+    E: 'static + Send + Sync + std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MCPInputError::SuspiciousValue => {
+                write!(f, "Suspicious all-one readout")
+            }
+            MCPInputError::I2C(e) => {
+                write!(f, "I2C error: {:?}", e)
+            }
+        }
+    }
+}
+
+impl<E> std::error::Error for MCPInputError<E> where E: Sync + Send + std::fmt::Debug + 'static {}
 
 impl MCP23017Input {
     pub fn new<I2C, E>(
@@ -57,14 +77,14 @@ impl MCP23017Input {
         let mut mcp = mcpdev::MCP23017::new(dev, addr).map_err(MCP23017::do_map_err::<I2C, E>)?;
         for i in 0..16 {
             mcp.pull_up(i, config.enable_pullups)
-                .map_err(|e| failure::err_msg(format!("{:?}", e)))?;
+                .map_err(|e| anyhow!("{:?}", e))?;
         }
         for i in 0..16 {
             mcp.invert_input_polarity(i, config.invert)
-                .map_err(|e| failure::err_msg(format!("{:?}", e)))?;
+                .map_err(|e| anyhow!("{:?}", e))?;
         }
         mcp.all_pin_mode(mcpdev::PinMode::INPUT)
-            .map_err(|e| failure::err_msg(format!("{:?}", e)))?;
+            .map_err(|e| anyhow!("{:?}", e))?;
 
         let inner = SynchronizedDeviceReadCore::new_from_core(DeviceReadCore::new(
             alias.clone(),
@@ -279,7 +299,12 @@ impl MCP23017Input {
                 }
             }
 
-            core.update_value_and_generate_events(real_ts, i, Ok(InputValue::Binary(*new_val)));
+            core.update_value_and_generate_events(
+                real_ts,
+                i,
+                Ok(InputValue::Binary(*new_val)),
+                false,
+            );
         }
 
         Ok(())

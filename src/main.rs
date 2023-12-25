@@ -5,14 +5,12 @@
 extern crate lazy_static;
 #[macro_use]
 extern crate prometheus;
-#[macro_use]
-extern crate failure;
-#[macro_use]
-extern crate log;
 
 use crate::device::UniverseState;
-use failure::{Error, ResultExt};
+use alloy::amqp;
+use anyhow::Context;
 use futures::lock::Mutex;
+use log::{debug, info};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::task;
@@ -38,7 +36,7 @@ mod poll;
 mod prom;
 mod tcp;
 
-type Result<T> = std::result::Result<T, Error>;
+type Result<T> = anyhow::Result<T>;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -57,8 +55,14 @@ async fn main() -> Result<()> {
         .context("unable to parse prometheus_listen_address")?;
     prom::start_prometheus(prometheus_addr)?;
 
+    info!("connecting to AMQP broker...");
+    let amqp_inputs_client =
+        amqp::ExchangeSubmarineInput::new(&cfg.program.amqp_server_address, &Vec::new())
+            .await
+            .context("unable to connect to AMQP broker")?;
+
     info!("creating state...");
-    let device_state = UniverseState::from_config(&cfg)
+    let device_state = UniverseState::from_config(&cfg, &amqp_inputs_client)
         .await
         .context("unable to create device state")?;
 

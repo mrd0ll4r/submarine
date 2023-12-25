@@ -5,17 +5,17 @@ use alloy::api::{APIRequest, APIResult, Message, SetRequest, SubscriptionRequest
 use alloy::event::{AddressedEvent, EventFilter};
 use alloy::tcp::Connection;
 use alloy::Address;
-use failure::err_msg;
-use failure::ResultExt;
+use anyhow::{anyhow, Context};
 use futures::lock::Mutex;
 use futures::{Stream, StreamExt};
 use itertools::Itertools;
+use log::{debug, error, info};
 use std::collections::HashMap;
 use std::mem;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
+use std::task::Poll;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
@@ -69,7 +69,7 @@ impl Client {
     ) -> Result<()> {
         let filters = subscriptions.get(&req.address);
         if filters.is_none() {
-            return Err(err_msg(format!("invalid address: {}", req.address)));
+            return Err(anyhow!("invalid address: {}", req.address));
         }
 
         let mut filter = filters.unwrap().lock().await;
@@ -321,7 +321,10 @@ struct GreedyBuffer {
 impl Stream for GreedyBuffer {
     type Item = Vec<AddressedEvent>;
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
         if self.fused {
             return Poll::Ready(None);
         }

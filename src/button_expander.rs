@@ -5,8 +5,9 @@ use crate::prom;
 use crate::{poll, Result};
 use alloy::config::{InputValue, InputValueType};
 use alloy::event::{ButtonEvent, Event, EventKind};
+use anyhow::{bail, ensure, Context};
 use embedded_hal as hal;
-use failure::*;
+use log::{trace, warn};
 use serde::{Deserialize, Serialize};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -23,6 +24,9 @@ pub struct ButtonExpanderBoardConfig {
 
 mod device {
     use embedded_hal as hal;
+    use log::{debug, trace};
+    use std::error::Error;
+    use std::fmt::{Display, Formatter};
 
     const READOUT_PENDING_BIT: u8 = 0x01;
     const WATCHDOG_BIT: u8 = 0x02;
@@ -30,12 +34,20 @@ mod device {
     const BOARD_ADDRESS: u8 = 0x3E;
 
     /// Errors that may occur when reading the expander.
-    #[derive(Fail, Debug, Clone)]
+    #[derive(Debug, Clone)]
     pub enum ButtonExpanderError {
         /// Occurs for a failed I2C bus operation.
-        #[fail(display = "I2C error: {:?}", _0)]
         Bus(String),
     }
+
+    impl Display for ButtonExpanderError {
+        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+            let ButtonExpanderError::Bus(inner) = self;
+            write!(f, "I2C error: {}", inner)
+        }
+    }
+
+    impl Error for ButtonExpanderError {}
 
     impl ButtonExpanderError {
         fn i2c_error<E: Sync + Send + std::fmt::Debug + 'static>(err: E) -> ButtonExpanderError {
@@ -486,7 +498,12 @@ impl ButtonExpanderBoard {
                 }
             }
 
-            core.update_value_and_generate_events(real_ts, i, Ok(InputValue::Binary(*new_val)));
+            core.update_value_and_generate_events(
+                real_ts,
+                i,
+                Ok(InputValue::Binary(*new_val)),
+                false,
+            );
         }
     }
 }

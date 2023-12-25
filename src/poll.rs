@@ -2,6 +2,7 @@ use crate::config::ValueScaling;
 use crate::device_core::SynchronizedDeviceRWCore;
 use crate::Result;
 use alloy::OutputValue;
+use log::{debug, trace, warn};
 use std::time::{Duration, Instant};
 use std::{thread, time};
 
@@ -67,6 +68,7 @@ pub(crate) fn poll_loop_end(
     values: Vec<OutputValue>,
     wake_up: Instant,
     update_interval: Duration,
+    force_events: bool,
 ) -> Duration {
     debug!(target: module_name, "updated: {:?}", update_result);
 
@@ -75,7 +77,7 @@ pub(crate) fn poll_loop_end(
     // Update device values, generate events, populate error in case something went wrong.
     {
         let mut core = core.core.lock().unwrap();
-        core.finish_update(update_result.map(|_| values), ts);
+        core.finish_update(update_result.map(|_| values), ts, force_events);
     }
 
     let (s, lagging) = calculate_sleep_duration(wake_up, update_interval);

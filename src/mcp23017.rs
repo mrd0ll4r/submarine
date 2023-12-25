@@ -3,7 +3,9 @@ use crate::device::{EventStream, HardwareDevice, OutputHardwareDevice, OutputPor
 use crate::device_core::{DeviceRWCore, SynchronizedDeviceRWCore};
 use crate::{prom, Result};
 use alloy::OutputValue;
+use anyhow::{anyhow, ensure};
 use embedded_hal as hal;
+use log::{debug, error, trace};
 use mcp23017 as mcpdev;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Condvar};
@@ -43,7 +45,7 @@ impl MCP23017 {
         let addr = MCP23017Config::slave_address(config.i2c_slave_address)?;
         let mut mcp = mcpdev::MCP23017::new(dev, addr).map_err(Self::do_map_err::<I2C, E>)?;
         mcp.all_pin_mode(mcpdev::PinMode::OUTPUT)
-            .map_err(|e| failure::err_msg(format!("{:?}", e)))?;
+            .map_err(|e| anyhow!("{:?}", e))?;
 
         let inner = SynchronizedDeviceRWCore::new_from_core(DeviceRWCore::new_dirty(
             alias.clone(),
@@ -108,7 +110,7 @@ impl MCP23017 {
             {
                 let ts = chrono::Utc::now();
                 let mut core = core.core.lock().unwrap();
-                core.finish_update(res.map(|_| values), ts);
+                core.finish_update(res.map(|_| values), ts, false);
             }
         }
     }
@@ -134,8 +136,7 @@ impl MCP23017 {
 
         // Send to device
         let before = Instant::now();
-        dev.write_gpioab(reg_full)
-            .map_err(|e| failure::err_msg(format!("{:?}", e)))?;
+        dev.write_gpioab(reg_full).map_err(|e| anyhow!("{:?}", e))?;
         let after = Instant::now();
         hist.observe(after.duration_since(before).as_micros() as f64);
         debug!(
@@ -160,7 +161,7 @@ impl MCP23017 {
         ((reg >> 8) as u8, reg as u8)
     }
 
-    pub(crate) fn do_map_err<I2C, E>(e: mcp23017::Error<E>) -> failure::Error
+    pub(crate) fn do_map_err<I2C, E>(e: mcp23017::Error<E>) -> anyhow::Error
     where
         I2C: hal::blocking::i2c::Write<Error = E>
             + Send
@@ -169,7 +170,7 @@ impl MCP23017 {
         E: Sync + Send + std::fmt::Debug + 'static,
     {
         match e {
-            mcp23017::Error::BusError(ref err) => failure::err_msg(format!("{:?}", err)),
+            mcp23017::Error::BusError(ref err) => anyhow!("{:?}", err),
             mcp23017::Error::InterruptPinError => panic!("interrupt pin not found?"),
         }
     }

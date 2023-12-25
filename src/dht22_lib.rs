@@ -23,6 +23,7 @@ use libc::sched_param;
 use libc::sched_setscheduler;
 use libc::SCHED_FIFO;
 use libc::SCHED_OTHER;
+use log::debug;
 use rppal::gpio::{IoPin, Level, Mode, PullUpDown};
 use std::cmp;
 use std::ptr::read_volatile;
@@ -126,12 +127,12 @@ fn decode(arr: [usize; DHT_PULSES * 2]) -> Result<Reading, ReadingError> {
     );
 
     if data[4] != checksum {
-        return Result::Err(ReadingError::Checksum);
+        return Err(ReadingError::Checksum);
     }
 
     let reading = decode_reading(data[0], data[1], data[2], data[3]);
 
-    Result::Ok(reading)
+    Ok(reading)
 }
 
 pub(crate) fn compute_checksum(d0: u8, d1: u8, d2: u8, d3: u8) -> u8 {
@@ -228,12 +229,12 @@ fn decode_pulses(pulses: &[u16]) -> Result<Reading, ReadingError> {
     );
 
     if data[4] != checksum {
-        return Result::Err(ReadingError::Checksum);
+        return Err(ReadingError::Checksum);
     }
 
     let reading = decode_reading(data[0], data[1], data[2], data[3]);
 
-    Result::Ok(reading)
+    Ok(reading)
 }
 
 fn pulses_to_binary(pulses: &[u16]) -> u8 {
@@ -423,7 +424,7 @@ fn read_pin_inner(
 
         if count > MAX_COUNT {
             debug!("timed out in count");
-            return Result::Err(ReadingError::Timeout);
+            return Err(ReadingError::Timeout);
         }
     }
 
@@ -439,7 +440,7 @@ fn read_pin_inner(
                     c,
                     pulse_counts.iter().join(", ").as_str()
                 );
-                return Result::Err(ReadingError::Timeout);
+                return Err(ReadingError::Timeout);
             }
         }
 
@@ -452,12 +453,12 @@ fn read_pin_inner(
                     c,
                     pulse_counts.iter().join(", ").as_str()
                 );
-                return Result::Err(ReadingError::Timeout);
+                return Err(ReadingError::Timeout);
             }
         }
     }
 
-    Result::Ok(count)
+    Ok(count)
 }
 
 #[cfg(test)]

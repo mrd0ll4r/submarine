@@ -12,8 +12,9 @@ use crate::fan_heater::device::{
 use crate::{poll, prom, Result};
 use alloy::config::{InputValue, InputValueType};
 use alloy::{OutputValue, HIGH, LOW};
+use anyhow::{anyhow, bail, ensure};
 use embedded_hal as hal;
-use failure::err_msg;
+use log::{debug, error, trace, warn};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::thread;
@@ -28,6 +29,7 @@ pub(crate) struct FanHeaterConfig {
 
 mod device {
     use embedded_hal as hal;
+    use log::debug;
 
     const WATCHDOG_BIT: u8 = 0x02;
 
@@ -271,9 +273,7 @@ impl FanHeater {
 
         // Create device and read both boards to see if they're actually there.
         let mut dev = device::FanHeaterBoard::new(dev);
-        let mut fan_board_state = dev
-            .read_fan_state()
-            .map_err(|err| err_msg(format!("{:?}", err)))?;
+        let mut fan_board_state = dev.read_fan_state().map_err(|err| anyhow!("{:?}", err))?;
         let mut count = 0;
         while fan_board_state.watchdog_reset {
             count += 1;
@@ -282,15 +282,13 @@ impl FanHeater {
             }
             warn!("fan board had a watchdog reset, attempting to clear...");
             dev.reset_fan_board_watchdog()
-                .map_err(|err| err_msg(format!("{:?}", err)))?;
-            fan_board_state = dev
-                .read_fan_state()
-                .map_err(|err| err_msg(format!("{:?}", err)))?;
+                .map_err(|err| anyhow!("{:?}", err))?;
+            fan_board_state = dev.read_fan_state().map_err(|err| anyhow!("{:?}", err))?;
         }
 
         let mut heater_board_state = dev
             .read_heater_state()
-            .map_err(|err| err_msg(format!("{:?}", err)))?;
+            .map_err(|err| anyhow!("{:?}", err))?;
         count = 0;
         while heater_board_state.watchdog_reset {
             count += 1;
@@ -299,10 +297,10 @@ impl FanHeater {
             }
             warn!("heater board had a watchdog reset, attempting to clear...");
             dev.reset_heater_board_watchdog()
-                .map_err(|err| err_msg(format!("{:?}", err)))?;
+                .map_err(|err| anyhow!("{:?}", err))?;
             heater_board_state = dev
                 .read_heater_state()
-                .map_err(|err| err_msg(format!("{:?}", err)))?;
+                .map_err(|err| anyhow!("{:?}", err))?;
         }
 
         // Launch a thread to do the work.
@@ -406,7 +404,7 @@ impl FanHeater {
                         if let Err(err) = dev.reset_fan_board_watchdog() {
                             error!("{}: unable to reset fan board watchdog: {:?}", alias, err);
                         }
-                        Err(err_msg("fan board watchdog reset"))
+                        Err(anyhow!("fan board watchdog reset"))
                     } else if heater_state.watchdog_reset {
                         readout_heater_board_watchdog_reset_error_counter.inc();
                         if let Err(err) = dev.reset_heater_board_watchdog() {
@@ -415,7 +413,7 @@ impl FanHeater {
                                 alias, err
                             );
                         }
-                        Err(err_msg("heater board watchdog reset"))
+                        Err(anyhow!("heater board watchdog reset"))
                     } else {
                         ok_counter.inc();
                         Ok((
@@ -447,26 +445,31 @@ impl FanHeater {
                             readout_bad_heater_board_error_counter.inc();
                         }
                     }
-                    Err(err_msg(format!("unable to write/read values: {:?}", err)))
+                    Err(anyhow!("unable to write/read values: {:?}", err))
                 }
             };
 
             let (rw_res, r_res) = match res {
                 Ok((rw_res, r_res)) => (Ok(rw_res), Ok(r_res)),
-                Err(err) => (Err(err_msg(format!("{:?}", err))), Err(err)),
+                Err(err) => (Err(anyhow!("{:?}", err)), Err(err)),
             };
 
             let ts = chrono::Utc::now();
             {
                 let mut core = inner.core.lock().unwrap();
-                core.finish_update(rw_res, ts);
+                core.finish_update(rw_res, ts, false);
             }
             {
                 let mut read_core = inner_read.core.lock().unwrap();
                 match r_res {
                     Ok((i2c_disabled, heater_disabled)) => {
-                        read_core.update_value_and_generate_events(ts, 0, Ok(i2c_disabled));
-                        read_core.update_value_and_generate_events(ts, 1, Ok(heater_disabled));
+                        read_core.update_value_and_generate_events(ts, 0, Ok(i2c_disabled), false);
+                        read_core.update_value_and_generate_events(
+                            ts,
+                            1,
+                            Ok(heater_disabled),
+                            false,
+                        );
                     }
                     Err(err) => {
                         let err = format!("{:?}", err);
@@ -545,7 +548,7 @@ impl HardwareDevice for FanHeater {
             4 => Ok(format!("heater-relay-2")),
             5 => Ok(format!("fan-i2c-disabled")),
             6 => Ok(format!("heater-disabled")),
-            _ => Err(err_msg("Fan/Heater boards have 7 ports")),
+            _ => Err(anyhow!("Fan/Heater boards have 7 ports")),
         }
     }
 }

@@ -2,8 +2,9 @@ use crate::device::{EventStream, HardwareDevice, InputHardwareDevice};
 use crate::device_core::{DeviceReadCore, SynchronizedDeviceReadCore};
 use crate::{dht22_lib, poll, prom, Result};
 use alloy::config::{InputValue, InputValueType};
+use anyhow::{anyhow, ensure};
 use embedded_hal as hal;
-use failure::err_msg;
+use log::{debug, error, trace, warn};
 use prometheus::core::{AtomicU64, GenericCounter};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -345,8 +346,13 @@ impl DHT22Expander {
                     warn!("{}: failed to read DHT {}: {:?}", alias, i, e);
 
                     let msg = format!("{:?}", e);
-                    core.update_value_and_generate_events(ts, i * 2, Err(err_msg(msg.clone())));
-                    core.update_value_and_generate_events(ts, i * 2 + 1, Err(err_msg(msg)));
+                    core.update_value_and_generate_events(
+                        ts,
+                        i * 2,
+                        Err(anyhow!(msg.clone())),
+                        true,
+                    );
+                    core.update_value_and_generate_events(ts, i * 2 + 1, Err(anyhow!(msg)), true);
 
                     // Set prometheus counters accordingly.
                     match e {
@@ -361,11 +367,13 @@ impl DHT22Expander {
                         ts,
                         i * 2,
                         Ok(InputValue::Temperature(readings.temperature as f64)),
+                        true,
                     );
                     core.update_value_and_generate_events(
                         ts,
                         i * 2 + 1,
                         Ok(InputValue::Humidity(readings.humidity as f64)),
+                        true,
                     );
 
                     ok_counter.inc();
@@ -536,7 +544,7 @@ impl HardwareDevice for DHT22Expander {
                     Ok(format!("dht-{}-humidity", port / 2))
                 }
             }
-            _ => Err(err_msg(
+            _ => Err(anyhow!(
                 "DHT22Expander has 32 ports: 16 groups of temperature and humidity",
             )),
         }

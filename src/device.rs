@@ -10,13 +10,17 @@ use crate::pca9685_sync::PCA9685Synchronized;
 use crate::Result;
 use crate::{config, i2c_mock, mcp23017, mcp23017_input, pca9685};
 use crate::{fan_heater, prom};
+use alloy::amqp::{
+    ExchangeSubmarineInput, ExchangeSubmarineInputPublisher, SubmarineInputRoutingKey,
+};
 use alloy::config::{InputValue, InputValueType};
 use alloy::event::{AddressedEvent, Event, EventKind};
 use alloy::{Address, OutputValue};
-use failure::{err_msg, format_err, ResultExt};
+use anyhow::{anyhow, ensure, Context};
 use futures::{Stream, StreamExt};
 use itertools::Itertools;
 use linux_embedded_hal as linux_hal;
+use log::{debug, error, info, warn};
 use prometheus::core::{AtomicF64, AtomicU64, GenericCounter, GenericGauge};
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
@@ -128,14 +132,16 @@ impl UniverseState {
 pub(crate) enum DeviceType {
     DHT22(Box<dyn InputHardwareDevice>),
     DHT22Expander(Box<dyn InputHardwareDevice>),
-    PCA9685(Box<dyn OutputHardwareDevice>),
     DS18(Box<dyn InputHardwareDevice>),
     MCP23017Input(Box<dyn InputHardwareDevice>),
-    MCP23017(Box<dyn OutputHardwareDevice>),
     BME280(Box<dyn InputHardwareDevice>),
     Gpio(Box<dyn InputHardwareDevice>),
-    FanHeater(Box<dyn InputHardwareDevice>, Box<dyn OutputHardwareDevice>),
+    FanHeater(Box<dyn InputHardwareDevice>),
     ButtonExpander(Box<dyn InputHardwareDevice>),
+
+    // Outputs
+    MCP23017(Box<dyn OutputHardwareDevice>),
+    PCA9685(Box<dyn OutputHardwareDevice>),
 }
 
 impl Debug for DeviceType {
@@ -155,7 +161,7 @@ impl DeviceType {
             DeviceType::MCP23017(_) => alloy::config::DeviceType::MCP23017,
             DeviceType::BME280(_) => alloy::config::DeviceType::BME280,
             DeviceType::Gpio(_) => alloy::config::DeviceType::GPIO,
-            DeviceType::FanHeater(_, _) => alloy::config::DeviceType::FanHeater,
+            DeviceType::FanHeater(_) => alloy::config::DeviceType::FanHeater,
             DeviceType::ButtonExpander(_) => alloy::config::DeviceType::ButtonExpander,
         }
     }
@@ -312,10 +318,9 @@ impl UniverseState {
                 | DeviceType::MCP23017Input(_)
                 | DeviceType::BME280(_)
                 | DeviceType::Gpio(_)
-                | DeviceType::ButtonExpander(_) => {}
-                DeviceType::PCA9685(dev)
-                | DeviceType::MCP23017(dev)
-                | DeviceType::FanHeater(_, dev) => {
+                | DeviceType::ButtonExpander(_)
+                | DeviceType::FanHeater(_) => {}
+                DeviceType::PCA9685(dev) | DeviceType::MCP23017(dev) => {
                     if let Err(e) = dev.update() {
                         error!("unable to update output device {}: {:?}", &device.alias, e)
                     }
@@ -330,7 +335,7 @@ impl UniverseState {
         let d = self
             .output_ports
             .get(&address)
-            .ok_or_else(|| format_err!("invalid address: {}", address))?;
+            .ok_or_else(|| anyhow!("invalid address: {}", address))?;
 
         d.lock().await.set(value).context(format!(
             "unable to set value for device at address {}",
@@ -342,9 +347,12 @@ impl UniverseState {
 }
 
 impl UniverseState {
-    pub(crate) async fn from_config(cfg: &AggregatedConfig) -> Result<UniverseState> {
+    pub(crate) async fn from_config(
+        cfg: &AggregatedConfig,
+        input_exchange: &ExchangeSubmarineInput,
+    ) -> Result<UniverseState> {
         info!("creating universe state...");
-        let universe = Self::create_universe_state(cfg).await?;
+        let universe = Self::create_universe_state(cfg, input_exchange).await?;
         debug!("created universe state {:?}", universe);
 
         info!(
@@ -363,11 +371,14 @@ impl UniverseState {
         let sender = self
             .event_streams
             .get(&addr)
-            .ok_or_else(|| err_msg("invalid address"))?;
+            .ok_or_else(|| anyhow!("invalid address"))?;
         Ok(sender.subscribe())
     }
 
-    async fn create_universe_state(cfg: &AggregatedConfig) -> Result<UniverseState> {
+    async fn create_universe_state(
+        cfg: &AggregatedConfig,
+        input_exchange: &ExchangeSubmarineInput,
+    ) -> Result<UniverseState> {
         let mut aliases = HashSet::new();
         let mut synchronized_pca9685s: HashMap<
             String,
@@ -404,19 +415,19 @@ impl UniverseState {
                 | DeviceType::MCP23017Input(input_dev)
                 | DeviceType::BME280(input_dev)
                 | DeviceType::Gpio(input_dev)
-                | DeviceType::ButtonExpander(input_dev) => {
-                    UniverseState::create_input_port_mappings(
-                        &mut aliases,
-                        &mut address_counter,
-                        &mut event_broadcasters,
-                        &device_config,
-                        &device_alias,
-                        &mut input_ports,
-                        input_dev,
-                    )
-                    .await
-                    .context("unable to map input ports")?
-                }
+                | DeviceType::ButtonExpander(input_dev)
+                | DeviceType::FanHeater(input_dev) => UniverseState::create_input_port_mappings(
+                    &mut aliases,
+                    &mut address_counter,
+                    &mut event_broadcasters,
+                    &device_config,
+                    &device_alias,
+                    &mut input_ports,
+                    input_dev,
+                    input_exchange,
+                )
+                .await
+                .context("unable to map input ports")?,
                 DeviceType::MCP23017(output_dev) | DeviceType::PCA9685(output_dev) => {
                     UniverseState::create_output_port_mappings(
                         &mut aliases,
@@ -427,38 +438,7 @@ impl UniverseState {
                         &device_alias,
                         &mut output_ports,
                         output_dev,
-                    )
-                    .await
-                    .context("unable to map output ports")?
-                }
-                DeviceType::FanHeater(input_dev, output_dev) => {
-                    // Supports both input and output ports
-                    let mut cfg_only_inputs = device_config.clone();
-                    cfg_only_inputs.outputs = None;
-                    let mut cfg_only_outputs = device_config.clone();
-                    cfg_only_outputs.inputs = None;
-
-                    UniverseState::create_input_port_mappings(
-                        &mut aliases,
-                        &mut address_counter,
-                        &mut event_broadcasters,
-                        &cfg_only_inputs,
-                        &device_alias,
-                        &mut input_ports,
-                        input_dev,
-                    )
-                    .await
-                    .context("unable to map input ports")?;
-
-                    UniverseState::create_output_port_mappings(
-                        &mut aliases,
-                        &mut address_counter,
-                        &mut addressed_output_ports,
-                        &mut event_broadcasters,
-                        &cfg_only_outputs,
-                        &device_alias,
-                        &mut output_ports,
-                        output_dev,
+                        input_exchange,
                     )
                     .await
                     .context("unable to map output ports")?
@@ -501,6 +481,7 @@ impl UniverseState {
         device_alias: &String,
         output_ports: &mut Vec<OutputPortState>,
         output_dev: &Box<dyn OutputHardwareDevice>,
+        input_exchange: &ExchangeSubmarineInput,
     ) -> Result<()> {
         Self::ensure_no_input_port_mappings_configured(device_config, device_alias)?;
 
@@ -536,6 +517,14 @@ impl UniverseState {
                     .context("unable to set default value")?;
             }
 
+            // Create AMQP publisher
+            let amqp_publisher = input_exchange
+                .new_publisher(SubmarineInputRoutingKey {
+                    alias: port_alias.clone(),
+                })
+                .await
+                .context("unable to set up AMQP publisher")?;
+
             let mut port = PortState {
                 port: port_config.base.port,
                 alias: port_alias.clone(),
@@ -563,6 +552,7 @@ impl UniverseState {
                 event_stream,
                 port_2,
                 broadcast_sender_2,
+                amqp_publisher,
                 address,
             );
 
@@ -583,6 +573,7 @@ impl UniverseState {
         mut event_stream: EventStream,
         port: Arc<PortState>,
         broadcast_sender: Arc<Sender<AddressedEvent>>,
+        amqp_publisher: ExchangeSubmarineInputPublisher,
         address: u16,
     ) {
         tokio::spawn(async move {
@@ -601,10 +592,18 @@ impl UniverseState {
                     Err(err) => port.update_last_value(event.timestamp, Err(err)).await,
                 }
 
+                let addressed_event = AddressedEvent { address, event };
+
+                // Push into AMQP channel
+                if let Err(e) = amqp_publisher.publish_event(&addressed_event).await {
+                    error!("unable to push event via AMQP: {:?}", e);
+                    return;
+                }
+
                 // Push into broadcast channel
                 // We ignore a potential error, because they can happen if there are no receivers
                 // at the moment. We can create more receivers though, so we just ignore it.
-                let _ = broadcast_sender.send(AddressedEvent { address, event });
+                let _ = broadcast_sender.send(addressed_event);
             }
         });
     }
@@ -650,6 +649,7 @@ impl UniverseState {
         device_alias: &String,
         input_ports: &mut Vec<InputPortState>,
         input_dev: &Box<dyn InputHardwareDevice>,
+        input_exchange: &ExchangeSubmarineInput,
     ) -> Result<()> {
         Self::ensure_no_output_port_mappings_configured(device_config, device_alias)?;
 
@@ -677,6 +677,14 @@ impl UniverseState {
                     device_alias, port_config.base.port
                 ))?;
             let address = *address_counter;
+
+            // Create AMQP publisher
+            let amqp_publisher = input_exchange
+                .new_publisher(SubmarineInputRoutingKey {
+                    alias: port_alias.clone(),
+                })
+                .await
+                .context("unable to set up AMQP publisher")?;
 
             let mut port = PortState {
                 port: port_config.base.port,
@@ -721,6 +729,7 @@ impl UniverseState {
                 event_stream,
                 port_2,
                 broadcast_sender_2,
+                amqp_publisher,
                 address,
             );
 
@@ -784,7 +793,7 @@ impl UniverseState {
                     let i2c = linux_hal::I2cdev::new(cfg.i2c_bus.clone())?;
                     fan_heater::FanHeater::new(i2c, alias, cfg)?
                 };
-                DeviceType::FanHeater(Box::new(dev.clone()), Box::new(dev))
+                DeviceType::FanHeater(Box::new(dev))
             }
             config::HardwareDeviceConfig::PCA9685 { config: cfg } => {
                 debug!("creating PCA9685 {}...", alias);

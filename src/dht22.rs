@@ -3,7 +3,8 @@ use crate::device_core::{DeviceReadCore, SynchronizedDeviceReadCore};
 use crate::dht22_lib::ReadingError;
 use crate::{dht22_lib, prom, Result};
 use alloy::config::{InputValue, InputValueType};
-use failure::{err_msg, ResultExt};
+use anyhow::{anyhow, ensure, Context};
+use log::{debug, warn};
 use prometheus::core::{AtomicU64, GenericCounter};
 use rand::Rng;
 use rppal::gpio;
@@ -151,11 +152,13 @@ impl DHT22 {
                         ts,
                         0,
                         Ok(InputValue::Temperature(readings.temperature as f64)),
+                        true,
                     );
                     core.update_value_and_generate_events(
                         ts,
                         1,
                         Ok(InputValue::Humidity(readings.humidity as f64)),
+                        true,
                     );
                 }
 
@@ -185,7 +188,7 @@ impl HardwareDevice for DHT22 {
         match port {
             0 => Ok("temperature".to_string()),
             1 => Ok("humidity".to_string()),
-            _ => Err(err_msg("DHT22 has two ports: temperature and humidity")),
+            _ => Err(anyhow!("DHT22 has two ports: temperature and humidity")),
         }
     }
 }

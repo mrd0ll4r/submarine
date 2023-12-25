@@ -2,6 +2,7 @@ use crate::device_core::SynchronizedDeviceRWCore;
 use crate::pca9685::{PCA9685Config, Pca9685Device, PCA9685};
 use crate::{pca9685, poll, prom, Result};
 use embedded_hal as hal;
+use log::{debug, trace, warn};
 use prometheus::Histogram;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -87,7 +88,7 @@ where
                 // Update device values, generate events, populate error in case something went wrong.
                 {
                     let mut core = core.core.lock().unwrap();
-                    core.finish_update(res.map(|_| values), ts);
+                    core.finish_update(res.map(|_| values), ts, false);
                 }
             }
 

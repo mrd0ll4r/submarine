@@ -2,7 +2,8 @@ use crate::device::{EventStream, HardwareDevice, InputHardwareDevice};
 use crate::device_core::{DeviceReadCore, SynchronizedDeviceReadCore};
 use crate::Result;
 use alloy::config::{InputValue, InputValueType};
-use failure::ResultExt;
+use anyhow::{ensure, Context};
+use log::debug;
 use rand::Rng;
 use rppal::gpio;
 use rppal::gpio::Gpio as RGpio;
@@ -94,6 +95,7 @@ impl Gpio {
                     } else {
                         InputValue::Binary(false)
                     }),
+                    false,
                 );
             }
         }

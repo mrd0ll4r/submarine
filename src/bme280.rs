@@ -3,8 +3,9 @@ use crate::device_core::{DeviceReadCore, SynchronizedDeviceReadCore};
 use crate::prom;
 use crate::Result;
 use alloy::config::{InputValue, InputValueType};
+use anyhow::{anyhow, ensure};
 use embedded_hal as hal;
-use failure::*;
+use log::{debug, warn};
 use prometheus::Histogram;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -55,7 +56,7 @@ impl BME280 {
 
         sensor
             .init()
-            .map_err(|e| failure::err_msg(format!("unable to init: {:?}", e)))?;
+            .map_err(|e| anyhow!("unable to init: {:?}", e))?;
 
         let inner = SynchronizedDeviceReadCore::new_from_core(DeviceReadCore::new(
             alias.clone(),
@@ -265,16 +266,19 @@ impl BME280 {
                         ts,
                         0,
                         Ok(InputValue::Temperature(readings.temperature as f64)),
+                        true,
                     );
                     core.update_value_and_generate_events(
                         ts,
                         1,
                         Ok(InputValue::Humidity(readings.humidity as f64)),
+                        true,
                     );
                     core.update_value_and_generate_events(
                         ts,
                         2,
                         Ok(InputValue::Pressure(readings.pressure as f64)),
+                        true,
                     );
                 }
 
@@ -301,7 +305,7 @@ impl HardwareDevice for BME280 {
             0 => Ok("temperature".to_string()),
             1 => Ok("humidity".to_string()),
             2 => Ok("pressure".to_string()),
-            _ => Err(err_msg(
+            _ => Err(anyhow!(
                 "BME280 has three ports: temperature, humidity, and pressure",
             )),
         }

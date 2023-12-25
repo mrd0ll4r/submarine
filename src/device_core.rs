@@ -6,8 +6,9 @@ use crate::Result;
 use alloy::config::{InputValue, InputValueType};
 use alloy::event::{Event, EventKind};
 use alloy::OutputValue;
-use failure::err_msg;
+use anyhow::{anyhow, ensure};
 use futures::{Stream, StreamExt};
+use log::trace;
 use std::collections::VecDeque;
 use std::iter;
 use std::pin::Pin;
@@ -75,15 +76,41 @@ impl DeviceReadCore {
         ts: chrono::DateTime<chrono::Utc>,
         index: usize,
         value: Result<InputValue>,
+        force_event: bool,
     ) {
         assert!(index < self.events.len(), "device core index out of bounds");
         if let Some(events) = &mut self.events[index] {
+            let generate_event = force_event
+                || self.device_values[index]
+                    .as_ref()
+                    .map_or(true, |v| match v {
+                        Ok(val) => {
+                            if let Ok(val2) = &value {
+                                val != val2
+                            } else {
+                                true
+                            }
+                        }
+                        Err(e) => {
+                            if let Err(e2) = &value {
+                                // TODO find a better way for this...
+                                let s1 = format!("{}", e);
+                                let s2 = format!("{}", e2);
+                                s1 != s2
+                            } else {
+                                true
+                            }
+                        }
+                    });
             match value {
                 Ok(value) => {
-                    events.push_back(Event {
-                        timestamp: ts,
-                        inner: Ok(EventKind::Update { new_value: value }),
-                    });
+                    // Only generate an event if something changed
+                    if generate_event {
+                        events.push_back(Event {
+                            timestamp: ts,
+                            inner: Ok(EventKind::Update { new_value: value }),
+                        });
+                    }
                     self.device_values[index] = Some(Ok(value));
                 }
                 Err(e) => {
@@ -109,7 +136,7 @@ impl DeviceReadCore {
         error_message: String,
     ) {
         for i in 0..self.value_types.len() {
-            self.update_value_and_generate_events(ts, i, Err(err_msg(error_message.clone())))
+            self.update_value_and_generate_events(ts, i, Err(anyhow!(error_message.clone())), true)
         }
     }
 
@@ -239,6 +266,7 @@ impl DeviceRWCore {
         &mut self,
         new_values: Result<Vec<OutputValue>>,
         ts: chrono::DateTime<chrono::Utc>,
+        force_events: bool,
     ) {
         match new_values {
             Ok(new_values) => {
@@ -247,6 +275,7 @@ impl DeviceRWCore {
                         .into_iter()
                         .map(|v| Ok(InputValue::Continuous(v))),
                     ts,
+                    force_events,
                 );
             }
             Err(err) => {
@@ -256,8 +285,9 @@ impl DeviceRWCore {
                 self.update_and_generate_events(
                     iter::repeat_with(|| msg.clone())
                         .take(self.buffered_values.len())
-                        .map(|v| Err(err_msg(v))),
+                        .map(|v| Err(anyhow!(v))),
                     ts,
+                    true,
                 );
             }
         }
@@ -267,11 +297,12 @@ impl DeviceRWCore {
         &mut self,
         new_values: T,
         ts: chrono::DateTime<chrono::Utc>,
+        force_events: bool,
     ) {
         // Generate events
         for (i, value) in new_values.into_iter().enumerate() {
             self.read_core
-                .update_value_and_generate_events(ts, i, value)
+                .update_value_and_generate_events(ts, i, value, force_events)
         }
     }
 }

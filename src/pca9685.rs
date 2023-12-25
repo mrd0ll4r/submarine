@@ -5,9 +5,10 @@ use crate::poll;
 use crate::prom;
 use crate::Result;
 use alloy::{OutputValue, HIGH, LOW};
+use anyhow::{anyhow, ensure, Context};
 use embedded_hal as hal;
-use failure::ResultExt;
 use itertools::Itertools;
+use log::{debug, warn};
 use pwm_pca9685 as pwmdev;
 use pwm_pca9685::Pca9685;
 use serde::{Deserialize, Serialize};
@@ -168,8 +169,15 @@ impl PCA9685 {
                 warn!("{}: unable to update PCA: {:?}", alias, e)
             }
 
-            sleep_duration =
-                poll::poll_loop_end(module_path!(), res, &core, values, wake_up, update_interval);
+            sleep_duration = poll::poll_loop_end(
+                module_path!(),
+                res,
+                &core,
+                values,
+                wake_up,
+                update_interval,
+                false,
+            );
         }
     }
 
@@ -225,7 +233,7 @@ impl PCA9685 {
     fn handle_update_async_inner<I2C, E>(
         values: &[OutputValue],
         scalings: Vec<ValueScaling>,
-        dev: &mut pwmdev::Pca9685<I2C>,
+        dev: &mut Pca9685<I2C>,
         metric: &prometheus::Histogram,
     ) -> Result<()>
     where
@@ -267,7 +275,7 @@ impl PCA9685 {
         Ok(())
     }
 
-    fn do_map_err<I2C, E>(e: pwmdev::Error<E>) -> failure::Error
+    fn do_map_err<I2C, E>(e: pwmdev::Error<E>) -> anyhow::Error
     where
         I2C: hal::blocking::i2c::Write<Error = E>
             + Send
@@ -277,7 +285,7 @@ impl PCA9685 {
     {
         match e {
             pwmdev::Error::InvalidInputData => panic!("invalid input data"),
-            pwmdev::Error::I2C(err) => failure::err_msg(format!("{:?}", err)),
+            pwmdev::Error::I2C(err) => anyhow!("{:?}", err),
         }
     }
 
@@ -314,9 +322,9 @@ impl PCA9685 {
                     ValueScaling::Logarithmic => {
                         // Apply logarithmic scaling according to https://www.mikrocontroller.net/articles/LED-Fading
                         // First, special-case MIN and MAX because they are probably common...
-                        if *v == std::u16::MIN {
-                            std::u16::MIN
-                        } else if *v == std::u16::MAX {
+                        if *v == u16::MIN {
+                            u16::MIN
+                        } else if *v == u16::MAX {
                             4095
                         } else {
                             // pow(2, log2(b-1) * (x+1) / a)

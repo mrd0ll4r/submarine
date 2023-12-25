@@ -3,7 +3,8 @@ use crate::device_core::{DeviceReadCore, SynchronizedDeviceReadCore};
 use crate::prom;
 use crate::Result;
 use alloy::config::{InputValue, InputValueType};
-use failure::ResultExt;
+use anyhow::{ensure, Context};
+use log::{debug, warn};
 use prometheus::core::{AtomicU64, GenericCounter};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -134,6 +135,7 @@ impl DS18 {
                                         ts,
                                         0,
                                         Ok(InputValue::Temperature(t)),
+                                        true,
                                     );
                                 }
 

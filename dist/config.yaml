@@ -8,8 +8,8 @@ submarine:
                     "config/dht22.yaml",
                     "config/button_expander.yaml",
                     "config/bme280.yaml",
-                    "config/ds18.yaml",
                     "config/mcp23017.yaml",
                     "config/dht22_expander.yaml",
+                    "config/ds18b20_expander.yaml",
                     "config/fan_heater.yaml",
   ]

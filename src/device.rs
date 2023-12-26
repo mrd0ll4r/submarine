@@ -154,6 +154,7 @@ impl UniverseState {
 pub(crate) enum DeviceType {
     DHT22(Box<dyn InputHardwareDevice>),
     DHT22Expander(Box<dyn InputHardwareDevice>),
+    DS18B20Expander(Box<dyn InputHardwareDevice>),
     DS18(Box<dyn InputHardwareDevice>),
     MCP23017Input(Box<dyn InputHardwareDevice>),
     BME280(Box<dyn InputHardwareDevice>),
@@ -177,6 +178,7 @@ impl DeviceType {
         match self {
             DeviceType::DHT22(_) => alloy::config::DeviceType::DHT22,
             DeviceType::DHT22Expander(_) => alloy::config::DeviceType::DHT22Expander,
+            DeviceType::DS18B20Expander(_) => alloy::config::DeviceType::DS18B20Expander,
             DeviceType::PCA9685(_) => alloy::config::DeviceType::PCA9685,
             DeviceType::DS18(_) => alloy::config::DeviceType::DS18,
             DeviceType::MCP23017Input(_) => alloy::config::DeviceType::MCP23017,
@@ -330,6 +332,7 @@ impl UniverseState {
             match dev.deref() {
                 DeviceType::DHT22(_)
                 | DeviceType::DHT22Expander(_)
+                | DeviceType::DS18B20Expander(_)
                 | DeviceType::DS18(_)
                 | DeviceType::MCP23017Input(_)
                 | DeviceType::BME280(_)
@@ -427,6 +430,7 @@ impl UniverseState {
             match &dev {
                 DeviceType::DHT22(input_dev)
                 | DeviceType::DHT22Expander(input_dev)
+                | DeviceType::DS18B20Expander(input_dev)
                 | DeviceType::DS18(input_dev)
                 | DeviceType::MCP23017Input(input_dev)
                 | DeviceType::BME280(input_dev)
@@ -915,6 +919,20 @@ impl UniverseState {
                     crate::dht22_expander::DHT22Expander::new(i2c, alias, config)?
                 };
                 DeviceType::DHT22Expander(Box::new(dev))
+            }
+            HardwareDeviceConfig::DS18B20Expander { config } => {
+                debug!("creating DS18B20Expander {}...", alias);
+
+                let dev = if config.i2c_bus.is_empty() {
+                    warn!("using I2C mock");
+                    let i2c = i2c_mock::I2cMock::new();
+                    crate::ds18b20_expander::DS18B20Expander::new(i2c, alias, config)?
+                } else {
+                    debug!("using I2C at {}", config.i2c_bus);
+                    let i2c = linux_hal::I2cdev::new(config.i2c_bus.clone())?;
+                    crate::ds18b20_expander::DS18B20Expander::new(i2c, alias, config)?
+                };
+                DeviceType::DS18B20Expander(Box::new(dev))
             }
             HardwareDeviceConfig::ButtonExpander { config } => {
                 debug!("creating button expander {}...", alias);

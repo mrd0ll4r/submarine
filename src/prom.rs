@@ -79,6 +79,12 @@ lazy_static! {
         &["alias", "result"]
     )
     .unwrap();
+    pub static ref DS18_EXPANDER_MEASUREMENTS: IntCounterVec = register_int_counter_vec!(
+        "ds18b20_expander_measurements",
+        "counts measurements for DS18B20-to-I2C expanders by alias and result",
+        &["alias", "result"]
+    )
+    .unwrap();
     pub static ref BME280_READ_DURATION: HistogramVec = register_histogram_vec!(
         "bme280_read_duration",
         "duration of reading from an BME280 in microseconds by alias",

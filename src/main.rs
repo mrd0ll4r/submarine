@@ -24,6 +24,8 @@ mod dht22;
 mod dht22_expander;
 mod dht22_lib;
 mod ds18;
+mod ds18b20_expander;
+mod ds18b20_expander_lib;
 mod fan_heater;
 mod gpio;
 mod http;

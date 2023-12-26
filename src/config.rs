@@ -3,6 +3,7 @@ use crate::button_expander::ButtonExpanderBoardConfig;
 use crate::dht22::DHT22Config;
 use crate::dht22_expander::DHT22ExpanderConfig;
 use crate::ds18::DS18Config;
+use crate::ds18b20_expander::DS18B20ExpanderConfig;
 use crate::fan_heater::FanHeaterConfig;
 use crate::gpio::GpioConfig;
 use crate::mcp23017::MCP23017Config;
@@ -215,4 +216,6 @@ pub(crate) enum HardwareDeviceConfig {
     FanHeater { config: FanHeaterConfig },
     #[serde(rename = "button_expander")]
     ButtonExpander { config: ButtonExpanderBoardConfig },
+    #[serde(rename = "ds18b20_expander")]
+    DS18B20Expander { config: DS18B20ExpanderConfig },
 }

@@ -197,19 +197,6 @@ fn truncate_to_length(res: &[u8]) -> &[u8] {
     &res[..(expected_length as usize) + 4 + 1]
 }
 
-fn validate_length(res: &[u8]) -> Result<&[u8], ExpanderError> {
-    let expected_length = res[4];
-    debug!("extracted expected length {}", expected_length);
-    if res[(expected_length as usize + 4 + 1)..]
-        .iter()
-        .any(|b| *b != 0)
-    {
-        return Err(ExpanderError::BadExpander("length mismatch".to_string()));
-    }
-
-    Ok(&res[..(expected_length as usize) + 4 + 1])
-}
-
 fn validate_crc(res: &[u8]) -> Result<(), ExpanderError> {
     let data_and_length = &res[4..];
 

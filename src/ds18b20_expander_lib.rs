@@ -1,6 +1,6 @@
 use embedded_hal as hal;
 use itertools::Itertools;
-use log::debug;
+use log::{debug, warn};
 use std::fmt::{Display, Formatter};
 
 /// Error code signaling that the device did not answer to its address.
@@ -21,6 +21,10 @@ pub(crate) enum ExpanderError {
 
     /// Occurs if the expander misbehaves.
     BadExpander(String),
+
+    /// Occurs if the maximum number of retries was exceeded.
+    /// Contains the error encountered during the last retry.
+    MaxRetriesExceeded(Box<ExpanderError>),
 }
 
 impl Display for ExpanderError {
@@ -34,6 +38,9 @@ impl Display for ExpanderError {
             }
             ExpanderError::BadExpander(err) => {
                 write!(f, "Expander misbehaved: {}", err)
+            }
+            ExpanderError::MaxRetriesExceeded(err) => {
+                write!(f, "Max retries exceeded. Last error: {}", err)
             }
         }
     }
@@ -90,11 +97,12 @@ where
 
     pub(crate) fn scan_for_devices(
         &mut self,
+        retry_count: usize,
         delay: &mut dyn hal::blocking::delay::DelayMs<u16>,
     ) -> Result<Vec<u64>, ExpanderError> {
         let sensor_ids = (0..=3)
             .map(|b| {
-                let res = self.scan_bus_for_devices(b, delay);
+                let res = self.scan_bus_for_devices(b, retry_count, delay);
                 debug!(
                     "got scan result {:?}",
                     res.as_ref().map(|vals| vals
@@ -120,6 +128,7 @@ where
     fn scan_bus_for_devices(
         &mut self,
         bus: u8,
+        retry_count: usize,
         delay: &mut dyn hal::blocking::delay::DelayMs<u16>,
     ) -> Result<Vec<u64>, ExpanderError> {
         debug!("scanning bus {} for devices...", bus);
@@ -127,35 +136,78 @@ where
 
         delay.delay_ms(2000);
 
-        self.read_registers(Some(30 * 8))
-            .map(data_bytes)
+        self.read_registers_with_retry(Some(30 * 8), retry_count, delay)
+            .map(|num| self.data_bytes(num))
             .and_then(parse_device_id_results)
     }
 
     pub(crate) fn read_temperatures(
         &mut self,
         delay: &mut dyn hal::blocking::delay::DelayMs<u16>,
+        retry_count: usize,
     ) -> Result<Vec<Result<f64, SensorError>>, ExpanderError> {
+        assert!(retry_count > 0, "retry count must be > 0");
+
+        debug!("initializing readout...");
         self.init_readout()?;
 
         delay.delay_ms(2000);
 
-        self.fetch_temperatures()
+        self.fetch_temperatures(retry_count, delay)
     }
 
     fn init_readout(&mut self) -> Result<(), ExpanderError> {
-        debug!("initializing readout");
         self.write_status_register(0b0001_0000)
     }
 
-    fn fetch_temperatures(&mut self) -> Result<Vec<Result<f64, SensorError>>, ExpanderError> {
+    fn fetch_temperatures(
+        &mut self,
+        retries: usize,
+        delay: &mut dyn hal::blocking::delay::DelayMs<u16>,
+    ) -> Result<Vec<Result<f64, SensorError>>, ExpanderError> {
         debug!("fetching temperatures");
-        self.read_registers(Some(self.num_sensors as usize * 2))
-            .map(data_bytes)
+        self.read_registers_with_retry(Some(self.num_sensors as usize * 2), retries, delay)
+            .map(|num| self.data_bytes(num))
             .and_then(parse_temperature_results)
     }
 
-    fn read_registers(&mut self, num_data_bytes: Option<usize>) -> Result<&[u8], ExpanderError> {
+    fn read_registers_with_retry(
+        &mut self,
+        num_data_bytes: Option<usize>,
+        retries: usize,
+        delay: &mut dyn hal::blocking::delay::DelayMs<u16>,
+    ) -> Result<usize, ExpanderError> {
+        for retry in 0..retries {
+            debug!(
+                "attempting readout of registers, try {} (of {})...",
+                retry + 1,
+                retries
+            );
+
+            let res = self.read_registers(num_data_bytes);
+            match res {
+                Ok(res) => return Ok(res),
+                Err(err) => {
+                    warn!(
+                        "unable to read registers, try {} (of {}): {:?}",
+                        retry + 1,
+                        retries,
+                        err
+                    );
+
+                    if retry == retries - 1 {
+                        return Err(ExpanderError::MaxRetriesExceeded(Box::new(err)));
+                    }
+
+                    delay.delay_ms(100);
+                }
+            }
+        }
+
+        unreachable!()
+    }
+
+    fn read_registers(&mut self, num_data_bytes: Option<usize>) -> Result<usize, ExpanderError> {
         self.buffer.iter_mut().for_each(|b| *b = 0);
 
         self.bus
@@ -176,13 +228,17 @@ where
 
         validate_crc(result_bytes)?;
 
-        Ok(result_bytes)
+        Ok(result_bytes.len())
     }
 
     fn write_status_register(&mut self, val: u8) -> Result<(), ExpanderError> {
         self.bus
             .write(self.address, &[0x00, val])
             .map_err(ExpanderError::from_i2c_error)
+    }
+
+    fn data_bytes(&self, res: usize) -> &[u8] {
+        &self.buffer[5..res]
     }
 }
 
@@ -213,10 +269,6 @@ fn validate_crc(res: &[u8]) -> Result<(), ExpanderError> {
     } else {
         Ok(())
     }
-}
-
-fn data_bytes(res: &[u8]) -> &[u8] {
-    &res[5..]
 }
 
 fn parse_temperature_results(res: &[u8]) -> Result<Vec<Result<f64, SensorError>>, ExpanderError> {
@@ -273,49 +325,19 @@ fn parse_temperature_results(res: &[u8]) -> Result<Vec<Result<f64, SensorError>>
 
                 res
             })
+            .and_then(|v| {
+                debug!("checking value {} for suspicious-ness...", v);
+                if v < -50_f64 {
+                    Err(SensorError::SuspiciousValue)
+                } else {
+                    Ok(v)
+                }
+            })
         })
         .collect();
 
     Ok(values)
 }
-
-/*
-[2023-12-26 21:46:12.713699 +00:00] DEBUG [submarine::ds18b20_expander_lib] src/ds18b20_expander_lib.rs:172: read raw bytes [0, 0, 127, 175, 20, 60, 1, 41, 1, 170, 0, 54, 1, 45, 1, 24, 0, 52, 0, 127, 0, 15, 1, 115, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-[2023-12-26 21:46:12.713841 +00:00] DEBUG [submarine::ds18b20_expander_lib] src/ds18b20_expander_lib.rs:191: extracted expected length 20
-[2023-12-26 21:46:12.713888 +00:00] DEBUG [submarine::ds18b20_expander_lib] src/ds18b20_expander_lib.rs:175: extracted result bytes: [0, 0, 127, 175, 20, 60, 1, 41, 1, 170, 0, 54, 1, 45, 1, 24, 0, 52, 0, 127, 0, 15, 1, 115, 1]
-[2023-12-26 21:46:12.713942 +00:00] DEBUG [submarine::ds18b20_expander_lib] src/ds18b20_expander_lib.rs:216: calculating CRC over [20, 60, 1, 41, 1, 170, 0, 54, 1, 45, 1, 24, 0, 52, 0, 127, 0, 15, 1, 115, 1]
-[2023-12-26 21:46:12.714005 +00:00] DEBUG [submarine::ds18b20_expander_lib] src/ds18b20_expander_lib.rs:219: extracted CRC 10101111, calculated 10101111
-[2023-12-26 21:46:12.714050 +00:00] DEBUG [submarine::ds18b20_expander_lib] src/ds18b20_expander_lib.rs:236: attempting to parse temperature values from bytes [60, 1, 41, 1, 170, 0, 54, 1, 45, 1, 24, 0, 52, 0, 127, 0, 15, 1, 115, 1]
-[2023-12-26 21:46:12.714101 +00:00] DEBUG [submarine::ds18b20_expander_lib] src/ds18b20_expander_lib.rs:249: combined bytes 3c and 01 to 013c (316)
-[2023-12-26 21:46:12.714150 +00:00] DEBUG [submarine::ds18b20_expander_lib] src/ds18b20_expander_lib.rs:249: combined bytes 29 and 01 to 0129 (297)
-[2023-12-26 21:46:12.714197 +00:00] DEBUG [submarine::ds18b20_expander_lib] src/ds18b20_expander_lib.rs:249: combined bytes aa and 00 to 00aa (170)
-[2023-12-26 21:46:12.714242 +00:00] DEBUG [submarine::ds18b20_expander_lib] src/ds18b20_expander_lib.rs:249: combined bytes 36 and 01 to 0136 (310)
-[2023-12-26 21:46:12.714287 +00:00] DEBUG [submarine::ds18b20_expander_lib] src/ds18b20_expander_lib.rs:249: combined bytes 2d and 01 to 012d (301)
-[2023-12-26 21:46:12.714334 +00:00] DEBUG [submarine::ds18b20_expander_lib] src/ds18b20_expander_lib.rs:249: combined bytes 18 and 00 to 0018 (24)
-[2023-12-26 21:46:12.714379 +00:00] DEBUG [submarine::ds18b20_expander_lib] src/ds18b20_expander_lib.rs:249: combined bytes 34 and 00 to 0034 (52)
-[2023-12-26 21:46:12.714424 +00:00] DEBUG [submarine::ds18b20_expander_lib] src/ds18b20_expander_lib.rs:249: combined bytes 7f and 00 to 007f (127)
-[2023-12-26 21:46:12.714468 +00:00] DEBUG [submarine::ds18b20_expander_lib] src/ds18b20_expander_lib.rs:249: combined bytes 0f and 01 to 010f (271)
-[2023-12-26 21:46:12.714514 +00:00] DEBUG [submarine::ds18b20_expander_lib] src/ds18b20_expander_lib.rs:249: combined bytes 73 and 01 to 0173 (371)
-[2023-12-26 21:46:12.714563 +00:00] DEBUG [submarine::ds18b20_expander] src/ds18b20_expander.rs:265: ds18b20-expander-1: got reading Err(SuspiciousValue) for sensor with ID 28aae1531a1302ef
-[2023-12-26 21:46:12.714611 +00:00] WARN [submarine::ds18b20_expander] src/ds18b20_expander.rs:272: ds18b20-expander-1: failed to read sensor with ID 28aae1531a1302ef: SuspiciousValue
-[2023-12-26 21:46:12.714683 +00:00] DEBUG [submarine::ds18b20_expander] src/ds18b20_expander.rs:265: ds18b20-expander-1: got reading Err(SuspiciousValue) for sensor with ID 28997275d0013c3e
-[2023-12-26 21:46:12.714749 +00:00] WARN [submarine::ds18b20_expander] src/ds18b20_expander.rs:272: ds18b20-expander-1: failed to read sensor with ID 28997275d0013c3e: SuspiciousValue
-[2023-12-26 21:46:12.714802 +00:00] DEBUG [submarine::ds18b20_expander] src/ds18b20_expander.rs:265: ds18b20-expander-1: got reading Err(SuspiciousValue) for sensor with ID 28cd7a75d0013cf2
-[2023-12-26 21:46:12.714848 +00:00] WARN [submarine::ds18b20_expander] src/ds18b20_expander.rs:272: ds18b20-expander-1: failed to read sensor with ID 28cd7a75d0013cf2: SuspiciousValue
-[2023-12-26 21:46:12.714897 +00:00] DEBUG [submarine::ds18b20_expander] src/ds18b20_expander.rs:265: ds18b20-expander-1: got reading Err(SuspiciousValue) for sensor with ID 285c4175d0013c80
-[2023-12-26 21:46:12.714943 +00:00] WARN [submarine::ds18b20_expander] src/ds18b20_expander.rs:272: ds18b20-expander-1: failed to read sensor with ID 285c4175d0013c80: SuspiciousValue
-[2023-12-26 21:46:12.714992 +00:00] DEBUG [submarine::ds18b20_expander] src/ds18b20_expander.rs:265: ds18b20-expander-1: got reading Err(SuspiciousValue) for sensor with ID 28aab575d0013cf9
-[2023-12-26 21:46:12.715038 +00:00] WARN [submarine::ds18b20_expander] src/ds18b20_expander.rs:272: ds18b20-expander-1: failed to read sensor with ID 28aab575d0013cf9: SuspiciousValue
-[2023-12-26 21:46:12.715086 +00:00] DEBUG [submarine::ds18b20_expander] src/ds18b20_expander.rs:265: ds18b20-expander-1: got reading Err(SuspiciousValue) for sensor with ID 28aa0dd4191302af
-[2023-12-26 21:46:12.715132 +00:00] WARN [submarine::ds18b20_expander] src/ds18b20_expander.rs:272: ds18b20-expander-1: failed to read sensor with ID 28aa0dd4191302af: SuspiciousValue
-[2023-12-26 21:46:12.715180 +00:00] DEBUG [submarine::ds18b20_expander] src/ds18b20_expander.rs:265: ds18b20-expander-1: got reading Err(SuspiciousValue) for sensor with ID 282f5e75d0013c52
-[2023-12-26 21:46:12.715225 +00:00] WARN [submarine::ds18b20_expander] src/ds18b20_expander.rs:272: ds18b20-expander-1: failed to read sensor with ID 282f5e75d0013c52: SuspiciousValue
-[2023-12-26 21:46:12.715273 +00:00] DEBUG [submarine::ds18b20_expander] src/ds18b20_expander.rs:265: ds18b20-expander-1: got reading Err(SuspiciousValue) for sensor with ID 284a2775d0013ce4
-[2023-12-26 21:46:12.715321 +00:00] WARN [submarine::ds18b20_expander] src/ds18b20_expander.rs:272: ds18b20-expander-1: failed to read sensor with ID 284a2775d0013ce4: SuspiciousValue
-[2023-12-26 21:46:12.715370 +00:00] DEBUG [submarine::ds18b20_expander] src/ds18b20_expander.rs:265: ds18b20-expander-1: got reading Err(SuspiciousValue) for sensor with ID 28aa553a1a1302bc
-[2023-12-26 21:46:12.715416 +00:00] WARN [submarine::ds18b20_expander] src/ds18b20_expander.rs:272: ds18b20-expander-1: failed to read sensor with ID 28aa553a1a1302bc: SuspiciousValue
-[2023-12-26 21:46:12.715463 +00:00] DEBUG [submarine::ds18b20_expander] src/ds18b20_expan
- */
 
 fn parse_device_id_results(res: &[u8]) -> Result<Vec<u64>, ExpanderError> {
     debug!("attempting to parse sensor IDs from bytes {:?}", res);

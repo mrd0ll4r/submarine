@@ -6,6 +6,7 @@ devices:
       i2c_bus: "/dev/i2c-3"
       i2c_slave_address: 0x3f
       readout_interval_seconds: 10
+      readout_retries: 5
       sensor_ids:
         - port: 0
           sensor_id: 0x28cd7a75d0013cf2

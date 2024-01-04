@@ -19,6 +19,7 @@ pub(crate) struct DS18B20ExpanderConfig {
     readout_interval_seconds: u8,
     i2c_slave_address: u8,
     sensor_ids: Vec<SensorToPortMapping>,
+    readout_retries: u8,
 }
 
 impl DS18B20ExpanderConfig {
@@ -81,6 +82,8 @@ impl DS18B20Expander {
             cfg.readout_interval_seconds >= 2,
             "readout_interval_seconds must be at least 2"
         );
+        ensure!(cfg.readout_retries > 0, "readout_retries must be > 0");
+
         let addr = cfg.slave_address()?;
 
         cfg.ensure_valid_sensor_mappings()
@@ -91,7 +94,7 @@ impl DS18B20Expander {
 
         debug!("scanning for devices...");
         let sensor_ids = expander
-            .scan_for_devices(&mut linux_embedded_hal::Delay)
+            .scan_for_devices(cfg.readout_retries as usize, &mut linux_embedded_hal::Delay)
             .context("unable to scan for devices")?;
         debug!(
             "got device IDs {:?}",
@@ -134,6 +137,7 @@ impl DS18B20Expander {
         // Launch a thread to do the work.
         let thread_core = inner.clone();
         let readout_interval = cfg.readout_interval_seconds;
+        let readout_retries = cfg.readout_retries as usize;
         let port_mappings = cfg.sensor_ids.clone();
         thread::Builder::new()
             .name(format!("DS18B20Expander {}", alias))
@@ -145,6 +149,7 @@ impl DS18B20Expander {
                     port_indices,
                     port_mappings,
                     sensor_ids,
+                    readout_retries,
                     alias,
                 )
             })?;
@@ -162,6 +167,7 @@ impl DS18B20Expander {
         port_indices: Vec<usize>,
         port_mappings: Vec<SensorToPortMapping>,
         sensor_ids: Vec<u64>,
+        readout_retries: usize,
         alias: String,
     ) where
         I2C: hal::blocking::i2c::Write<Error = E>
@@ -209,7 +215,8 @@ impl DS18B20Expander {
             last_wakeup = wake_up;
 
             // Read values
-            let readout_res = dev.read_temperatures(&mut linux_embedded_hal::Delay);
+            let readout_res =
+                dev.read_temperatures(&mut linux_embedded_hal::Delay, readout_retries);
             match readout_res {
                 Err(err) => {
                     error!("{}: unable to read data: {:?}", alias, err);
@@ -224,6 +231,16 @@ impl DS18B20Expander {
                         ExpanderError::BadExpander(_) => {
                             readout_bad_expander_error_counter.inc();
                         }
+                        ExpanderError::MaxRetriesExceeded(err) => match *err {
+                            ExpanderError::Bus(_) => readout_i2c_error_counter.inc(),
+                            ExpanderError::CrcMismatch => readout_crc_mismatch_counter.inc(),
+                            ExpanderError::BadExpander(_) => {
+                                readout_bad_expander_error_counter.inc();
+                            }
+                            ExpanderError::MaxRetriesExceeded(_) => {
+                                unreachable!()
+                            }
+                        },
                     }
                 }
                 Ok(values) => {

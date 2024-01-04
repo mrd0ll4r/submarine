@@ -110,7 +110,7 @@ impl MCP23017 {
             {
                 let ts = chrono::Utc::now();
                 let mut core = core.core.lock().unwrap();
-                core.finish_update(res.map(|_| values), ts, false);
+                core.finish_update(res.map(|_| values), ts, false, false);
             }
         }
     }

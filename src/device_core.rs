@@ -77,6 +77,7 @@ impl DeviceReadCore {
         index: usize,
         value: Result<InputValue>,
         force_event: bool,
+        suppress_update_event: bool,
     ) {
         assert!(index < self.events.len(), "device core index out of bounds");
         if let Some(events) = &mut self.events[index] {
@@ -86,7 +87,7 @@ impl DeviceReadCore {
                     .map_or(true, |v| match v {
                         Ok(val) => {
                             if let Ok(val2) = &value {
-                                val != val2
+                                !suppress_update_event && (val != val2)
                             } else {
                                 true
                             }
@@ -136,7 +137,13 @@ impl DeviceReadCore {
         error_message: String,
     ) {
         for i in 0..self.value_types.len() {
-            self.update_value_and_generate_events(ts, i, Err(anyhow!(error_message.clone())), true)
+            self.update_value_and_generate_events(
+                ts,
+                i,
+                Err(anyhow!(error_message.clone())),
+                true,
+                false,
+            )
         }
     }
 
@@ -267,6 +274,7 @@ impl DeviceRWCore {
         new_values: Result<Vec<OutputValue>>,
         ts: chrono::DateTime<chrono::Utc>,
         force_events: bool,
+        suppress_update_events: bool,
     ) {
         match new_values {
             Ok(new_values) => {
@@ -276,6 +284,7 @@ impl DeviceRWCore {
                         .map(|v| Ok(InputValue::Continuous(v))),
                     ts,
                     force_events,
+                    suppress_update_events,
                 );
             }
             Err(err) => {
@@ -288,6 +297,7 @@ impl DeviceRWCore {
                         .map(|v| Err(anyhow!(v))),
                     ts,
                     true,
+                    false,
                 );
             }
         }
@@ -298,11 +308,17 @@ impl DeviceRWCore {
         new_values: T,
         ts: chrono::DateTime<chrono::Utc>,
         force_events: bool,
+        suppress_update_events: bool,
     ) {
         // Generate events
         for (i, value) in new_values.into_iter().enumerate() {
-            self.read_core
-                .update_value_and_generate_events(ts, i, value, force_events)
+            self.read_core.update_value_and_generate_events(
+                ts,
+                i,
+                value,
+                force_events,
+                suppress_update_events,
+            )
         }
     }
 }

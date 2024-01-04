@@ -351,8 +351,15 @@ impl DHT22Expander {
                         i * 2,
                         Err(anyhow!(msg.clone())),
                         true,
+                        false,
                     );
-                    core.update_value_and_generate_events(ts, i * 2 + 1, Err(anyhow!(msg)), true);
+                    core.update_value_and_generate_events(
+                        ts,
+                        i * 2 + 1,
+                        Err(anyhow!(msg)),
+                        true,
+                        false,
+                    );
 
                     // Set prometheus counters accordingly.
                     match e {
@@ -368,12 +375,14 @@ impl DHT22Expander {
                         i * 2,
                         Ok(InputValue::Temperature(readings.temperature as f64)),
                         true,
+                        false,
                     );
                     core.update_value_and_generate_events(
                         ts,
                         i * 2 + 1,
                         Ok(InputValue::Humidity(readings.humidity as f64)),
                         true,
+                        false,
                     );
 
                     ok_counter.inc();

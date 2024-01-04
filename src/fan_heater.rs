@@ -457,17 +457,24 @@ impl FanHeater {
             let ts = chrono::Utc::now();
             {
                 let mut core = inner.core.lock().unwrap();
-                core.finish_update(rw_res, ts, false);
+                core.finish_update(rw_res, ts, false, false);
             }
             {
                 let mut read_core = inner_read.core.lock().unwrap();
                 match r_res {
                     Ok((i2c_disabled, heater_disabled)) => {
-                        read_core.update_value_and_generate_events(ts, 0, Ok(i2c_disabled), false);
+                        read_core.update_value_and_generate_events(
+                            ts,
+                            0,
+                            Ok(i2c_disabled),
+                            false,
+                            false,
+                        );
                         read_core.update_value_and_generate_events(
                             ts,
                             1,
                             Ok(heater_disabled),
+                            false,
                             false,
                         );
                     }

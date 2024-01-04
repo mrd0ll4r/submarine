@@ -69,6 +69,7 @@ pub(crate) fn poll_loop_end(
     wake_up: Instant,
     update_interval: Duration,
     force_events: bool,
+    suppress_update_events: bool,
 ) -> Duration {
     debug!(target: module_name, "updated: {:?}", update_result);
 
@@ -77,7 +78,12 @@ pub(crate) fn poll_loop_end(
     // Update device values, generate events, populate error in case something went wrong.
     {
         let mut core = core.core.lock().unwrap();
-        core.finish_update(update_result.map(|_| values), ts, force_events);
+        core.finish_update(
+            update_result.map(|_| values),
+            ts,
+            force_events,
+            suppress_update_events,
+        );
     }
 
     let (s, lagging) = calculate_sleep_duration(wake_up, update_interval);

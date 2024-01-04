@@ -267,18 +267,21 @@ impl BME280 {
                         0,
                         Ok(InputValue::Temperature(readings.temperature as f64)),
                         true,
+                        false,
                     );
                     core.update_value_and_generate_events(
                         ts,
                         1,
                         Ok(InputValue::Humidity(readings.humidity as f64)),
                         true,
+                        false,
                     );
                     core.update_value_and_generate_events(
                         ts,
                         2,
                         Ok(InputValue::Pressure(readings.pressure as f64)),
                         true,
+                        false,
                     );
                 }
 

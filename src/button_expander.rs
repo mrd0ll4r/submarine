@@ -503,6 +503,7 @@ impl ButtonExpanderBoard {
                 i,
                 Ok(InputValue::Binary(*new_val)),
                 false,
+                false,
             );
         }
     }

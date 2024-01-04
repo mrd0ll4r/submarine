@@ -136,6 +136,7 @@ impl DS18 {
                                         0,
                                         Ok(InputValue::Temperature(t)),
                                         true,
+                                        false,
                                     );
                                 }
 

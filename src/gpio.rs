@@ -96,6 +96,7 @@ impl Gpio {
                         InputValue::Binary(false)
                     }),
                     false,
+                    false,
                 );
             }
         }

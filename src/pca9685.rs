@@ -177,6 +177,7 @@ impl PCA9685 {
                 wake_up,
                 update_interval,
                 false,
+                true,
             );
         }
     }

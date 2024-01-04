@@ -298,6 +298,7 @@ impl DS18B20Expander {
                             port_index.port as usize,
                             Err(anyhow!(msg)),
                             true,
+                            false,
                         );
                     }
                 }
@@ -312,6 +313,7 @@ impl DS18B20Expander {
                             port_index.port as usize,
                             Ok(InputValue::Temperature(temperature)),
                             true,
+                            false,
                         );
                     }
                 }

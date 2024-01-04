@@ -304,6 +304,7 @@ impl MCP23017Input {
                 i,
                 Ok(InputValue::Binary(*new_val)),
                 false,
+                false,
             );
         }
 

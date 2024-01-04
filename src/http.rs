@@ -1,14 +1,42 @@
 use crate::device::UniverseState;
 use anyhow::{Context, Result};
+use std::fmt;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use warp::Filter;
 
+/// Wrapper to pretty-print optional values.
+struct OptFmt<T>(Option<T>);
+
+impl<T: fmt::Display> fmt::Display for OptFmt<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(ref t) = self.0 {
+            fmt::Display::fmt(t, f)
+        } else {
+            f.write_str("-")
+        }
+    }
+}
+
 pub(crate) async fn run_server(addr: SocketAddr, state: Arc<Mutex<UniverseState>>) -> Result<()> {
     let api = filters::api(state);
 
-    let routes = api.with(warp::log("api"));
+    let routes = api.with(warp::log::custom(move |info: warp::log::Info<'_>| {
+        // This is the exact same as warp::log::log("api"), but logging at DEBUG instead of INFO.
+        log::debug!(
+            target: "api",
+            "{} \"{} {} {:?}\" {} \"{}\" \"{}\" {:?}",
+            OptFmt(info.remote_addr()),
+            info.method(),
+            info.path(),
+            info.version(),
+            info.status().as_u16(),
+            OptFmt(info.referer()),
+            OptFmt(info.user_agent()),
+            info.elapsed(),
+        );
+    }));
 
     // Start up the server...
     let (_, fut) = warp::serve(routes)

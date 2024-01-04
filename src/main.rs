@@ -37,7 +37,6 @@ mod pca9685;
 mod pca9685_sync;
 mod poll;
 mod prom;
-mod tcp;
 
 type Result<T> = anyhow::Result<T>;
 
@@ -71,23 +70,12 @@ async fn main() -> Result<()> {
 
     let state = Arc::new(Mutex::new(device_state));
 
-    info!("starting TCP server...");
-    let tcp_server_address = cfg.program.tcp_server_listen_address.parse()?;
-    let tcp_server = task::spawn(tcp::run_server(tcp_server_address, state.clone()));
-    info!(
-        "TCP server is listening on tcp://{}",
-        cfg.program.tcp_server_listen_address
-    );
-
     info!("starting HTTP server...");
     let http_server_address = cfg.program.http_server_listen_address.parse()?;
     let http_server = task::spawn(http::run_server(http_server_address, state.clone()));
     info!("HTTP server is listening on http://{}", http_server_address);
 
-    tokio::select! {
-        _ = tcp_server => {}
-        _ = http_server => {}
-    }
+    http_server.await??;
 
     Ok(())
 }

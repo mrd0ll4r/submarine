@@ -13,8 +13,9 @@ use crate::{i2c_mock, mcp23017, mcp23017_input, pca9685};
 use alloy::amqp::{
     ExchangeSubmarineInput, ExchangeSubmarineInputPublisher, SubmarineInputRoutingKey,
 };
+use alloy::api::TimestampedInputValue;
 use alloy::config::{InputValue, InputValueType};
-use alloy::event::{AddressedEvent, Event, EventKind, TimestampedInputValue};
+use alloy::event::{AddressedEvent, Event, EventKind};
 use alloy::{Address, OutputValue};
 use anyhow::{anyhow, ensure, Context};
 use futures::{Stream, StreamExt};
@@ -28,7 +29,6 @@ use std::fmt::{Debug, Formatter};
 use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
-use tokio::sync::broadcast::Sender;
 use tokio::sync::Mutex;
 
 pub(crate) trait HardwareDevice: Send {
@@ -76,8 +76,6 @@ pub(crate) struct UniverseState {
     devices: Vec<HardwareDeviceState>,
 
     output_ports: HashMap<Address, Arc<Mutex<Box<dyn OutputPort>>>>,
-
-    event_streams: HashMap<Address, Arc<tokio::sync::broadcast::Sender<AddressedEvent>>>,
 }
 
 impl Debug for UniverseState {
@@ -108,24 +106,6 @@ impl UniverseState {
             version: self.version.lock().await.get(),
             devices: dev_configs,
         }
-    }
-
-    pub(crate) async fn get_update_events_for_current_values(&self) -> Vec<AddressedEvent> {
-        let mut events = Vec::new();
-        for dev in self.devices.iter() {
-            for p in dev.input_ports.iter() {
-                if let Some(event) = p.port.get_update_event_for_current_value().await {
-                    events.push(event)
-                }
-            }
-            for p in dev.output_ports.iter() {
-                if let Some(event) = p.port.get_update_event_for_current_value().await {
-                    events.push(event)
-                }
-            }
-        }
-
-        events
     }
 
     pub(crate) async fn get_all_last_values(
@@ -269,17 +249,6 @@ impl PortState {
             *v = Some(TimestampedInputValue { ts, value: val })
         }
     }
-
-    async fn get_update_event_for_current_value(&self) -> Option<AddressedEvent> {
-        let v = self.last_value.lock().await;
-        v.clone().map(|v| AddressedEvent {
-            address: self.address,
-            event: Event {
-                timestamp: v.ts,
-                inner: v.value.map(|val| EventKind::Update { new_value: val }),
-            },
-        })
-    }
 }
 
 #[derive(Debug)]
@@ -383,17 +352,6 @@ impl UniverseState {
         Ok(universe)
     }
 
-    pub(crate) fn get_event_stream(
-        &self,
-        addr: Address,
-    ) -> Result<tokio::sync::broadcast::Receiver<AddressedEvent>> {
-        let sender = self
-            .event_streams
-            .get(&addr)
-            .ok_or_else(|| anyhow!("invalid address"))?;
-        Ok(sender.subscribe())
-    }
-
     async fn create_universe_state(
         cfg: &AggregatedConfig,
         input_exchange: &ExchangeSubmarineInput,
@@ -406,7 +364,6 @@ impl UniverseState {
         let mut address_counter = 1;
         let mut devices = Vec::new();
         let mut addressed_output_ports = HashMap::new();
-        let mut event_broadcasters = HashMap::new();
 
         for device_config in cfg.devices.clone() {
             debug!("creating device {}...", device_config.alias);
@@ -439,7 +396,6 @@ impl UniverseState {
                 | DeviceType::FanHeater(input_dev) => UniverseState::create_input_port_mappings(
                     &mut aliases,
                     &mut address_counter,
-                    &mut event_broadcasters,
                     &device_config,
                     &device_alias,
                     &mut input_ports,
@@ -453,7 +409,6 @@ impl UniverseState {
                         &mut aliases,
                         &mut address_counter,
                         &mut addressed_output_ports,
-                        &mut event_broadcasters,
                         &device_config,
                         &device_alias,
                         &mut output_ports,
@@ -485,7 +440,6 @@ impl UniverseState {
             version: Mutex::new(Cell::new(1)),
             devices,
             output_ports: addressed_output_ports,
-            event_streams: event_broadcasters,
         })
     }
 
@@ -493,10 +447,6 @@ impl UniverseState {
         aliases: &mut HashSet<String>,
         address_counter: &mut u16,
         addressed_output_ports: &mut HashMap<Address, Arc<Mutex<Box<dyn OutputPort>>>>,
-        event_broadcasters: &mut HashMap<
-            Address,
-            Arc<tokio::sync::broadcast::Sender<AddressedEvent>>,
-        >,
         device_config: &DeviceConfig,
         device_alias: &String,
         output_ports: &mut Vec<OutputPortState>,
@@ -564,14 +514,9 @@ impl UniverseState {
             let port = Arc::new(port);
             let port_2 = port.clone();
 
-            let (event_broadcast_sender, _) = tokio::sync::broadcast::channel(100);
-            let event_broadcast_sender = Arc::new(event_broadcast_sender);
-            let broadcast_sender_2 = event_broadcast_sender.clone();
-
             UniverseState::spawn_event_to_broadcast_worker(
                 event_stream,
                 port_2,
-                broadcast_sender_2,
                 amqp_publisher,
                 address,
             );
@@ -582,7 +527,6 @@ impl UniverseState {
             };
 
             addressed_output_ports.insert(address, output_port_state.dev.clone());
-            event_broadcasters.insert(address, event_broadcast_sender);
             *address_counter += 1;
             output_ports.push(output_port_state);
         }
@@ -592,7 +536,6 @@ impl UniverseState {
     fn spawn_event_to_broadcast_worker(
         mut event_stream: EventStream,
         port: Arc<PortState>,
-        broadcast_sender: Arc<Sender<AddressedEvent>>,
         amqp_publisher: ExchangeSubmarineInputPublisher,
         address: u16,
     ) {
@@ -619,11 +562,6 @@ impl UniverseState {
                     error!("unable to push event via AMQP: {:?}", e);
                     return;
                 }
-
-                // Push into broadcast channel
-                // We ignore a potential error, because they can happen if there are no receivers
-                // at the moment. We can create more receivers though, so we just ignore it.
-                let _ = broadcast_sender.send(addressed_event);
             }
         });
     }
@@ -661,10 +599,6 @@ impl UniverseState {
     async fn create_input_port_mappings(
         aliases: &mut HashSet<String>,
         address_counter: &mut u16,
-        event_broadcasters: &mut HashMap<
-            Address,
-            Arc<tokio::sync::broadcast::Sender<AddressedEvent>>,
-        >,
         device_config: &DeviceConfig,
         device_alias: &String,
         input_ports: &mut Vec<InputPortState>,
@@ -741,14 +675,9 @@ impl UniverseState {
             let port = Arc::new(port);
             let port_2 = port.clone();
 
-            let (event_broadcast_sender, _) = tokio::sync::broadcast::channel(100);
-            let event_broadcast_sender = Arc::new(event_broadcast_sender);
-            let broadcast_sender_2 = event_broadcast_sender.clone();
-
             UniverseState::spawn_event_to_broadcast_worker(
                 event_stream,
                 port_2,
-                broadcast_sender_2,
                 amqp_publisher,
                 address,
             );
@@ -756,7 +685,6 @@ impl UniverseState {
             let port = InputPortState { port, value_type };
 
             *address_counter += 1;
-            event_broadcasters.insert(address, event_broadcast_sender);
             input_ports.push(port);
         }
 

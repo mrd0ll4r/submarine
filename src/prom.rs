@@ -9,12 +9,6 @@ use systemstat::{saturating_sub_bytes, Platform, System};
 
 // Sensor-related metrics.
 lazy_static! {
-    pub static ref FAN_HEATER_WRITES: IntCounterVec = register_int_counter_vec!(
-        "fan_heater_writes",
-        "counts writes for the fan/heater board combo by alias and result",
-        &["alias", "result"]
-    )
-    .unwrap();
     pub static ref DHT22_MEASUREMENTS: IntCounterVec = register_int_counter_vec!(
         "dht22_measurements",
         "counts measurements for DHT22 sensors by alias and result",

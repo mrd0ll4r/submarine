@@ -4,7 +4,6 @@ use crate::config::{
 use crate::device_core::{DeviceRWCore, SynchronizedDeviceRWCore};
 use crate::dht22::DHT22;
 use crate::ds18::DS18;
-use crate::fan_heater;
 use crate::gpio::Gpio;
 use crate::pca9685::PCA9685Config;
 use crate::pca9685_sync::PCA9685Synchronized;
@@ -675,19 +674,6 @@ impl UniverseState {
         alias: String,
     ) -> Result<DeviceType> {
         let dev = match &device_config.hardware_device_config {
-            HardwareDeviceConfig::FanHeater { config: cfg } => {
-                debug!("creating FanHeater combo {}...", alias);
-                let dev = if cfg.i2c_bus.is_empty() {
-                    warn!("using I2C mock");
-                    let i2c = i2c_mock::I2cMock::new();
-                    fan_heater::FanHeater::new(i2c, alias, cfg)?
-                } else {
-                    debug!("using I2C at {}", cfg.i2c_bus);
-                    let i2c = linux_hal::I2cdev::new(cfg.i2c_bus.clone())?;
-                    fan_heater::FanHeater::new(i2c, alias, cfg)?
-                };
-                DeviceType::FanHeater(Box::new(dev))
-            }
             HardwareDeviceConfig::PCA9685 { config: cfg } => {
                 debug!("creating PCA9685 {}...", alias);
                 let dev = if cfg.i2c_bus.is_empty() {

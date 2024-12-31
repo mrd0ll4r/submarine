@@ -7,52 +7,6 @@ use std::thread;
 use std::time::Duration;
 use systemstat::{saturating_sub_bytes, Platform, System};
 
-// Value-related metrics
-lazy_static! {
-    pub static ref BINARY: GaugeVec = register_gauge_vec!(
-        "input_binary",
-        "binary input values by alias and status",
-        &["alias"]
-    )
-    .unwrap();
-    pub static ref CONTINUOUS: GaugeVec = register_gauge_vec!(
-        "input_continuous",
-        "continuous 16-bit input values by alias and status",
-        &["alias"]
-    )
-    .unwrap();
-    pub static ref TEMPERATURE: GaugeVec = register_gauge_vec!(
-        "input_temperature",
-        "temperature in celsius by alias and status",
-        &["alias"]
-    )
-    .unwrap();
-    pub static ref HUMIDITY: GaugeVec = register_gauge_vec!(
-        "input_humidity",
-        "relative humidity by alias and status",
-        &["alias"]
-    )
-    .unwrap();
-    pub static ref PRESSURE: GaugeVec = register_gauge_vec!(
-        "input_pressure",
-        "air pressure in pascals by alias and status",
-        &["alias"]
-    )
-    .unwrap();
-    pub static ref VALUE_OK: GaugeVec = register_gauge_vec!(
-        "input_value_ok",
-        "whether the current input value is ok, by alias",
-        &["alias"]
-    )
-    .unwrap();
-    pub static ref VALUE_UPDATES: IntCounterVec = register_int_counter_vec!(
-        "input_updates",
-        "number of input value updates by alias and status",
-        &["alias", "status"]
-    )
-    .unwrap();
-}
-
 // Sensor-related metrics.
 lazy_static! {
     pub static ref FAN_HEATER_WRITES: IntCounterVec = register_int_counter_vec!(

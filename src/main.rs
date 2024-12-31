@@ -59,7 +59,7 @@ async fn main() -> Result<()> {
 
     info!("connecting to AMQP broker...");
     let amqp_inputs_client =
-        amqp::ExchangeSubmarineInput::new(&cfg.program.amqp_server_address, &Vec::new())
+        amqp::ExchangeShackInput::new(&cfg.program.amqp_server_address, &Vec::new())
             .await
             .context("unable to connect to AMQP broker")?;
 

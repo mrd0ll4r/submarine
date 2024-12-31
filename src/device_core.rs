@@ -4,7 +4,7 @@ use crate::device::{
 };
 use crate::Result;
 use alloy::config::{InputValue, InputValueType};
-use alloy::event::{Event, EventKind};
+use alloy::event::{Event, EventError, EventKind};
 use alloy::OutputValue;
 use anyhow::{anyhow, ensure};
 use futures::{Stream, StreamExt};
@@ -115,10 +115,9 @@ impl DeviceReadCore {
                     self.device_values[index] = Some(Ok(value));
                 }
                 Err(e) => {
-                    let msg = format!("{:?}", e);
                     events.push_back(Event {
                         timestamp: ts,
-                        inner: Err(msg),
+                        inner: Err(EventError::from(&e)),
                     });
                     self.device_values[index] = Some(Err(e));
                 }

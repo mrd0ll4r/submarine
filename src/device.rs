@@ -4,25 +4,22 @@ use crate::config::{
 use crate::device_core::{DeviceRWCore, SynchronizedDeviceRWCore};
 use crate::dht22::DHT22;
 use crate::ds18::DS18;
+use crate::fan_heater;
 use crate::gpio::Gpio;
 use crate::pca9685::PCA9685Config;
 use crate::pca9685_sync::PCA9685Synchronized;
 use crate::Result;
-use crate::{fan_heater, prom};
 use crate::{i2c_mock, mcp23017, mcp23017_input, pca9685};
-use alloy::amqp::{
-    ExchangeSubmarineInput, ExchangeSubmarineInputPublisher, SubmarineInputRoutingKey,
-};
+use alloy::amqp::{ExchangeShackInput, ExchangeShackInputPublisher, ShackInputRoutingKey};
 use alloy::api::TimestampedInputValue;
 use alloy::config::{InputValue, InputValueType};
-use alloy::event::{AddressedEvent, Event, EventKind};
+use alloy::event::{AddressedEvent, Event, EventError, EventKind};
 use alloy::{Address, OutputValue};
 use anyhow::{anyhow, ensure, Context};
 use futures::{Stream, StreamExt};
 use itertools::Itertools;
 use linux_embedded_hal as linux_hal;
 use log::{debug, error, info, warn};
-use prometheus::core::{AtomicF64, AtomicU64, GenericCounter, GenericGauge};
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
@@ -207,43 +204,14 @@ pub(crate) struct PortState {
     tags: HashSet<String>,
     address: Address,
     last_value: Mutex<Option<TimestampedInputValue>>,
-
-    value_metric: GenericGauge<AtomicF64>,
-    ok_metric: GenericGauge<AtomicF64>,
-    update_ok_counter: GenericCounter<AtomicU64>,
-    update_error_counter: GenericCounter<AtomicU64>,
 }
 
 impl PortState {
     async fn update_last_value(
         &self,
         ts: chrono::DateTime<chrono::Utc>,
-        val: std::result::Result<InputValue, String>,
+        val: std::result::Result<InputValue, EventError>,
     ) {
-        match &val {
-            Ok(v) => {
-                self.value_metric.set(match v {
-                    InputValue::Binary(b) => {
-                        if *b {
-                            1_f64
-                        } else {
-                            0_f64
-                        }
-                    }
-                    InputValue::Temperature(t) => *t,
-                    InputValue::Humidity(h) => *h,
-                    InputValue::Pressure(p) => *p,
-                    InputValue::Continuous(c) => *c as f64,
-                });
-                self.ok_metric.set(1_f64);
-                self.update_ok_counter.inc();
-            }
-            Err(_) => {
-                self.ok_metric.set(0_f64);
-                self.update_error_counter.inc();
-            }
-        }
-
         {
             let mut v = self.last_value.lock().await;
             *v = Some(TimestampedInputValue { ts, value: val })
@@ -337,7 +305,7 @@ impl UniverseState {
 impl UniverseState {
     pub(crate) async fn from_config(
         cfg: &AggregatedConfig,
-        input_exchange: &ExchangeSubmarineInput,
+        input_exchange: &ExchangeShackInput,
     ) -> Result<UniverseState> {
         info!("creating universe state...");
         let universe = Self::create_universe_state(cfg, input_exchange).await?;
@@ -354,7 +322,7 @@ impl UniverseState {
 
     async fn create_universe_state(
         cfg: &AggregatedConfig,
-        input_exchange: &ExchangeSubmarineInput,
+        input_exchange: &ExchangeShackInput,
     ) -> Result<UniverseState> {
         let mut aliases = HashSet::new();
         let mut synchronized_pca9685s: HashMap<
@@ -451,7 +419,7 @@ impl UniverseState {
         device_alias: &String,
         output_ports: &mut Vec<OutputPortState>,
         output_dev: &Box<dyn OutputHardwareDevice>,
-        input_exchange: &ExchangeSubmarineInput,
+        input_exchange: &ExchangeShackInput,
     ) -> Result<()> {
         Self::ensure_no_input_port_mappings_configured(device_config, device_alias)?;
 
@@ -489,8 +457,9 @@ impl UniverseState {
 
             // Create AMQP publisher
             let amqp_publisher = input_exchange
-                .new_publisher(SubmarineInputRoutingKey {
-                    alias: port_alias.clone(),
+                .new_publisher(ShackInputRoutingKey {
+                    input_value_type: Some(InputValueType::Continuous),
+                    alias: Some(port_alias.clone()),
                 })
                 .await
                 .context("unable to set up AMQP publisher")?;
@@ -501,12 +470,6 @@ impl UniverseState {
                 tags: port_config.base.tags.unwrap_or_default(),
                 address,
                 last_value: Mutex::new(None),
-                value_metric: prom::CONTINUOUS.with_label_values(&[port_alias.as_str()]),
-                ok_metric: prom::VALUE_OK.with_label_values(&[port_alias.as_str()]),
-                update_ok_counter: prom::VALUE_UPDATES
-                    .with_label_values(&[port_alias.as_str(), "ok"]),
-                update_error_counter: prom::VALUE_UPDATES
-                    .with_label_values(&[port_alias.as_str(), "error"]),
             };
             port.tags
                 .extend(device_config.tags.clone().unwrap_or_default().into_iter());
@@ -536,7 +499,7 @@ impl UniverseState {
     fn spawn_event_to_broadcast_worker(
         mut event_stream: EventStream,
         port: Arc<PortState>,
-        amqp_publisher: ExchangeSubmarineInputPublisher,
+        amqp_publisher: ExchangeShackInputPublisher,
         address: u16,
     ) {
         tokio::spawn(async move {
@@ -555,7 +518,10 @@ impl UniverseState {
                     Err(err) => port.update_last_value(event.timestamp, Err(err)).await,
                 }
 
-                let addressed_event = AddressedEvent { address, event };
+                let addressed_event = AddressedEvent {
+                    alias: port.alias.clone(),
+                    event,
+                };
 
                 // Push into AMQP channel
                 if let Err(e) = amqp_publisher.publish_event(&addressed_event).await {
@@ -603,7 +569,7 @@ impl UniverseState {
         device_alias: &String,
         input_ports: &mut Vec<InputPortState>,
         input_dev: &Box<dyn InputHardwareDevice>,
-        input_exchange: &ExchangeSubmarineInput,
+        input_exchange: &ExchangeShackInput,
     ) -> Result<()> {
         Self::ensure_no_output_port_mappings_configured(device_config, device_alias)?;
 
@@ -634,8 +600,9 @@ impl UniverseState {
 
             // Create AMQP publisher
             let amqp_publisher = input_exchange
-                .new_publisher(SubmarineInputRoutingKey {
-                    alias: port_alias.clone(),
+                .new_publisher(ShackInputRoutingKey {
+                    input_value_type: Some(value_type),
+                    alias: Some(port_alias.clone()),
                 })
                 .await
                 .context("unable to set up AMQP publisher")?;
@@ -646,28 +613,6 @@ impl UniverseState {
                 tags: port_config.base.tags.unwrap_or_default(),
                 address,
                 last_value: Mutex::new(None),
-                value_metric: match value_type {
-                    InputValueType::Binary => {
-                        prom::BINARY.with_label_values(&[port_alias.as_str()])
-                    }
-                    InputValueType::Temperature => {
-                        prom::TEMPERATURE.with_label_values(&[port_alias.as_str()])
-                    }
-                    InputValueType::Humidity => {
-                        prom::HUMIDITY.with_label_values(&[port_alias.as_str()])
-                    }
-                    InputValueType::Pressure => {
-                        prom::PRESSURE.with_label_values(&[port_alias.as_str()])
-                    }
-                    InputValueType::Continuous => {
-                        prom::CONTINUOUS.with_label_values(&[port_alias.as_str()])
-                    }
-                },
-                ok_metric: prom::VALUE_OK.with_label_values(&[port_alias.as_str()]),
-                update_ok_counter: prom::VALUE_UPDATES
-                    .with_label_values(&[port_alias.as_str(), "ok"]),
-                update_error_counter: prom::VALUE_UPDATES
-                    .with_label_values(&[port_alias.as_str(), "error"]),
             };
             port.tags
                 .extend(device_config.tags.clone().unwrap_or_default().into_iter());

@@ -12,6 +12,7 @@ use anyhow::Context;
 use log::{debug, info};
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::{panic, process};
 use tokio::sync::Mutex;
 use tokio::task;
 
@@ -42,6 +43,16 @@ type Result<T> = anyhow::Result<T>;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Set the panic hook to kill the process.
+    // If we don't do this, some threads could die or other stuff could panic without
+    // the main process exiting and being restarted.
+    let orig_hook = panic::take_hook();
+    panic::set_hook(Box::new(move |panic_info| {
+        // Invoke the default handler and exit the process.
+        orig_hook(panic_info);
+        process::exit(1);
+    }));
+
     logging::set_up_logging().expect("unable to set up logging");
     info!("set up logging");
 

@@ -1,16 +1,10 @@
 submarine:
+  # Address of the AMQP server to connect to.
   amqp_server_address: "amqp://127.0.0.1:5672/%2f"
+  # Address to expose the HTTP API on.
   http_server_listen_address: "0.0.0.0:3069"
-  tcp_server_listen_address: "127.0.0.1:3030"
+  # Address to expose Prometheus on.
   prometheus_listen_address: "127.0.0.1:6969"
-  log_to_file: true
+  # A list of device config files to load.
   device_configs: [
-    "config/ds18b20_expander.yaml",
-    "config/pca9685.yaml",
-    "config/dht22.yaml",
-    "config/button_expander.yaml",
-    "config/bme280.yaml",
-    "config/mcp23017.yaml",
-    "config/dht22_expander.yaml",
-    "config/fan_heater.yaml",
   ]

@@ -8,6 +8,7 @@ use crate::gpio::GpioConfig;
 use crate::mcp23017::MCP23017Config;
 use crate::mcp23017_input::MCP23017InputConfig;
 use crate::pca9685::PCA9685Config;
+use crate::tasmota_relay_expander::TasmotaRelayExpanderConfig;
 use crate::Result;
 use alloy::{OutputValue, HIGH, LOW};
 use anyhow::{anyhow, Context};
@@ -213,4 +214,6 @@ pub(crate) enum HardwareDeviceConfig {
     ButtonExpander { config: ButtonExpanderBoardConfig },
     #[serde(rename = "ds18b20_expander")]
     DS18B20Expander { config: DS18B20ExpanderConfig },
+    #[serde(rename = "tasmota_relay_expander")]
+    TasmotaRelayExpander { config: TasmotaRelayExpanderConfig },
 }

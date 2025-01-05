@@ -141,6 +141,7 @@ pub(crate) enum DeviceType {
     // Outputs
     MCP23017(Box<dyn OutputHardwareDevice>),
     PCA9685(Box<dyn OutputHardwareDevice>),
+    TasmotaRelayExpander(Box<dyn OutputHardwareDevice>),
 }
 
 impl Debug for DeviceType {
@@ -163,6 +164,7 @@ impl DeviceType {
             DeviceType::Gpio(_) => alloy::config::DeviceType::GPIO,
             DeviceType::FanHeater(_) => alloy::config::DeviceType::FanHeater,
             DeviceType::ButtonExpander(_) => alloy::config::DeviceType::ButtonExpander,
+            DeviceType::TasmotaRelayExpander(_) => alloy::config::DeviceType::TasmotaRelayExpander,
         }
     }
 }
@@ -275,7 +277,9 @@ impl UniverseState {
                 | DeviceType::Gpio(_)
                 | DeviceType::ButtonExpander(_)
                 | DeviceType::FanHeater(_) => {}
-                DeviceType::PCA9685(dev) | DeviceType::MCP23017(dev) => {
+                DeviceType::PCA9685(dev)
+                | DeviceType::MCP23017(dev)
+                | DeviceType::TasmotaRelayExpander(dev) => {
                     if let Err(e) = dev.update() {
                         error!("unable to update output device {}: {:?}", &device.alias, e)
                     }
@@ -347,6 +351,7 @@ impl UniverseState {
                 &device_config,
                 device_alias.clone(),
             )
+            .await
             .context(format!("unable to create device {}", device_alias))?;
             let mut input_ports = Vec::new();
             let mut output_ports = Vec::new();
@@ -371,7 +376,9 @@ impl UniverseState {
                 )
                 .await
                 .context("unable to map input ports")?,
-                DeviceType::MCP23017(output_dev) | DeviceType::PCA9685(output_dev) => {
+                DeviceType::MCP23017(output_dev)
+                | DeviceType::PCA9685(output_dev)
+                | DeviceType::TasmotaRelayExpander(output_dev) => {
                     UniverseState::create_output_port_mappings(
                         &mut aliases,
                         &mut address_counter,
@@ -665,7 +672,7 @@ impl UniverseState {
         Ok(())
     }
 
-    fn create_device_type(
+    async fn create_device_type(
         synchronized_pca9685s: &mut HashMap<
             String,
             Vec<(SynchronizedDeviceRWCore, PCA9685Config, String)>,
@@ -806,6 +813,13 @@ impl UniverseState {
                     crate::button_expander::ButtonExpanderBoard::new(i2c, config, alias)?
                 };
                 DeviceType::ButtonExpander(Box::new(dev))
+            }
+            HardwareDeviceConfig::TasmotaRelayExpander { config } => {
+                debug!("creating Tasmota relay expander {}...", alias);
+
+                let dev = crate::tasmota_relay_expander::TasmotaRelayExpander::new(&config, alias)
+                    .await?;
+                DeviceType::TasmotaRelayExpander(Box::new(dev))
             }
         };
 

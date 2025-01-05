@@ -36,6 +36,7 @@ mod pca9685;
 mod pca9685_sync;
 mod poll;
 mod prom;
+mod tasmota_relay_expander;
 
 type Result<T> = anyhow::Result<T>;
 

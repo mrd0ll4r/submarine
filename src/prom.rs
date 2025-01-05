@@ -53,6 +53,13 @@ lazy_static! {
         exponential_buckets(200_f64, (1.5_f64).sqrt(), 10).unwrap()
     )
     .unwrap();
+    pub static ref TASMOTA_RELAY_EXPANDER_WRITE_DURATION: HistogramVec = register_histogram_vec!(
+        "tasmota_relay_expander_write_duration",
+        "duration of writing to a Tasmota relay expander in microseconds by alias",
+        &["alias"],
+        exponential_buckets(150_f64, (1.5_f64).sqrt(), 10).unwrap()
+    )
+    .unwrap();
     pub static ref MCP23017_WRITE_DURATION: HistogramVec = register_histogram_vec!(
         "mcp23017_write_duration",
         "duration of writing to an MCP23017 in microseconds by alias",

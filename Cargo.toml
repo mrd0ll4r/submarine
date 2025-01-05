@@ -39,6 +39,7 @@ mcp23017 = "1.0.0"
 libc = "0.2"
 bme280 = "0.2.1"
 crc = "3.0.1"
+reqwest = {version= "0.12", default-features = false, features = ["json","rustls-tls"]}
 
 # Prometheus, metrics
 prometheus_exporter = "0.8.5"

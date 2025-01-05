@@ -109,8 +109,9 @@ mod filters {
 mod handlers {
     use crate::device::UniverseState;
     use alloy::api::{SetRequest, SetRequestTarget};
-    use anyhow::{bail, Context};
-    use log::debug;
+    use anyhow::{anyhow, bail, Context};
+    use itertools::Itertools;
+    use log::{debug, error, warn};
     use std::convert::Infallible;
     use std::sync::Arc;
     use tokio::sync::Mutex;
@@ -152,13 +153,18 @@ mod handlers {
         state: &mut UniverseState,
         set_requests: Vec<SetRequest>,
     ) -> Result<(), anyhow::Error> {
+        let mut failures = Vec::new();
         for req in set_requests {
             match req.target {
                 SetRequestTarget::Address(addr) => {
-                    state
+                    if let Err(err) = state
                         .set_address(addr, req.value)
                         .await
-                        .context("unable to set address")?;
+                        .context("unable to set address")
+                    {
+                        warn!("unable to set address: {:?}", &err);
+                        failures.push(err);
+                    }
                 }
                 SetRequestTarget::Alias(_) => {
                     bail!("alias targets not supported at the moment")
@@ -166,7 +172,17 @@ mod handlers {
             }
         }
 
-        state.update().await.context("unable to update hardware")?;
+        if let Err(err) = state.update().await.context("unable to update hardware") {
+            error!("unable to update hardware: {:?}", &err);
+            failures.push(err);
+        }
+
+        if !failures.is_empty() {
+            return Err(anyhow!(
+                "unable to set one or more outputs: {:?}",
+                failures.iter().map(|e| format!("{:?}", e)).join("; ")
+            ));
+        }
 
         Ok(())
     }
